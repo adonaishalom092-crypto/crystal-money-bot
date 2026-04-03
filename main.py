@@ -4,15 +4,11 @@ from aiogram import Bot, Dispatcher, types
 from aiogram.utils import executor
 import datetime
 
-# Token depuis Render
-API_TOKEN = os.getenv("TELEGRAM_TOKEN")
-if not API_TOKEN:
-    raise ValueError("Le token Telegram n'est pas défini dans TELEGRAM_TOKEN")
+API_TOKEN = os.getenv("API_TOKEN")
 
 bot = Bot(token=API_TOKEN)
 dp = Dispatcher(bot)
 
-# Base SQLite
 conn = sqlite3.connect("bot.db")
 cursor = conn.cursor()
 
@@ -26,7 +22,6 @@ CREATE TABLE IF NOT EXISTS users (
 """)
 conn.commit()
 
-# Canal obligatoire
 CHANNEL = "https://t.me/+RBJns9gbyWdiYWYy"
 
 async def check_sub(user_id):
@@ -42,14 +37,14 @@ async def start(message: types.Message):
     args = message.get_args()
 
     if not await check_sub(user_id):
-        await message.answer(f"🚫 Rejoins le canal pour continuer:\n{CHANNEL}")
+        await message.answer("🚫 Rejoins le canal pour continuer:\nhttps://t.me/+RBJns9gbyWdiYWYy")
         return
 
     cursor.execute("SELECT * FROM users WHERE user_id=?", (user_id,))
     user = cursor.fetchone()
 
     if not user:
-        ref = int(args) if args and args.isdigit() else None
+        ref = int(args) if args.isdigit() else None
         cursor.execute("INSERT INTO users (user_id, referrer) VALUES (?, ?)", (user_id, ref))
         
         if ref:
@@ -65,10 +60,9 @@ async def bonus(message: types.Message):
     today = str(datetime.date.today())
 
     cursor.execute("SELECT last_claim FROM users WHERE user_id=?", (user_id,))
-    last = cursor.fetchone()
-    last_claim = last[0] if last else None
+    result = cursor.fetchone()
 
-    if last_claim == today:
+    if result and result[0] == today:
         await message.answer("❌ Déjà réclamé aujourd'hui")
         return
 
@@ -80,15 +74,15 @@ async def bonus(message: types.Message):
 @dp.message_handler(commands=['solde'])
 async def solde(message: types.Message):
     cursor.execute("SELECT balance FROM users WHERE user_id=?", (message.from_user.id,))
-    balance = cursor.fetchone()
-    balance_val = balance[0] if balance else 0
-    await message.answer(f"💰 Solde: {balance_val} FCFA")
+    result = cursor.fetchone()
+    balance = result[0] if result else 0
+    await message.answer(f"💰 Solde: {balance} FCFA")
 
 @dp.message_handler(commands=['refer'])
 async def refer(message: types.Message):
-    link = f"https://t.me/Wellcashgain_bot?start={message.from_user.id}"
+    link = f"https://t.me/wellcashgain_bot?start={message.from_user.id}"
     await message.answer(f"🔗 Ton lien:\n{link}")
 
 if __name__ == "__main__":
-    print("Bot en ligne...")
-    executor.start_polling(dp)
+    print("Bot started...")
+    executor.start_polling(dp, skip_updates=True)
