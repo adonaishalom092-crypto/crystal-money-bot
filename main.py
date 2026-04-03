@@ -22,7 +22,7 @@ CREATE TABLE IF NOT EXISTS users (
 """)
 conn.commit()
 
-CHANNEL = "https://t.me/+RBJns9gbyWdiYWYy"
+CHANNEL = "@crystalmoneychannel"
 
 async def check_sub(user_id):
     try:
