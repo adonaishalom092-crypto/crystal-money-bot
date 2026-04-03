@@ -1,7 +1,7 @@
 # Crystal Money Bot - Render Deployment
 
 ## Variables d'environnement
-- `TELEGRAM_TOKEN` : Ton token Telegram Bot
+- `8489287711:AAE11z079C4RrbpJHr1Rq5Iatx1ZHuYd7DM` : Ton token Telegram Bot
 
 ## Déploiement Render
 
