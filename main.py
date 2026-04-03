@@ -33,8 +33,7 @@ async def check_sub(user_id):
 
 @dp.message_handler(commands=['start'])
 async def start(message: types.Message):
-    user_id = message.from_user.id
-    args = message.get_args()
+    await message.answer("✅ Bot fonctionne !")
 
     if not await check_sub(user_id):
         await message.answer("🚫 Rejoins le canal pour continuer:\nhttps://t.me/+RBJns9gbyWdiYWYy")
