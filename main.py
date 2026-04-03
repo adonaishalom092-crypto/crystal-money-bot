@@ -86,7 +86,7 @@ async def solde(message: types.Message):
 
 @dp.message_handler(commands=['refer'])
 async def refer(message: types.Message):
-    link = f"https://t.me/wellcashgain_bot?start={message.from_user.id}"
+    link = f"https://t.me/Wellcashgain_bot?start={message.from_user.id}"
     await message.answer(f"🔗 Ton lien:\n{link}")
 
 if __name__ == "__main__":
