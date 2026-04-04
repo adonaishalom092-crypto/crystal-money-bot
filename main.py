@@ -3,18 +3,14 @@ from aiogram.types import ParseMode, InlineKeyboardButton, InlineKeyboardMarkup
 import asyncio
 
 API_TOKEN = "TON_TOKEN_ICI"
-CHANNEL_USERNAME = "@crystalmoneychannel"  # Username public du canal
+CHANNEL_USERNAME = "@crystalmoneychannel"
 
 bot = Bot(token=API_TOKEN, parse_mode=ParseMode.HTML)
 dp = Dispatcher(bot)
 
-# Stockage temporaire des utilisateurs en attente
 pending_users = set()
 
 async def check_membership(user_id: int):
-    """
-    Vérifie si l'utilisateur est membre du canal public
-    """
     try:
         member = await bot.get_chat_member(CHANNEL_USERNAME, user_id)
         return member.status not in ['left', 'kicked']
@@ -23,16 +19,16 @@ async def check_membership(user_id: int):
         return False
 
 def join_button():
-    """
-    Créé un bouton inline pour que l'utilisateur confirme qu'il a rejoint le canal
-    """
     keyboard = InlineKeyboardMarkup()
     keyboard.add(InlineKeyboardButton("✅ J’ai rejoint", callback_data="joined_channel"))
     return keyboard
 
 @dp.message_handler(commands=['start'])
 async def start(message: types.Message):
-    is_member = await check_membership(message.from_user.id)
+    user_id = message.from_user.id
+    await message.reply("🤖 Bot démarré... Vérification du canal en cours.")
+    
+    is_member = await check_membership(user_id)
     if is_member:
         await message.reply(f"✅ Bonjour {message.from_user.first_name} ! Bienvenue dans le bot.")
     else:
@@ -42,7 +38,7 @@ async def start(message: types.Message):
             "Puis clique sur le bouton ci-dessous après l'avoir rejoint.",
             reply_markup=join_button()
         )
-        pending_users.add(message.from_user.id)
+        pending_users.add(user_id)
 
 @dp.callback_query_handler(lambda c: c.data == "joined_channel")
 async def joined_channel(callback_query: types.CallbackQuery):
@@ -64,4 +60,4 @@ async def joined_channel(callback_query: types.CallbackQuery):
 
 if __name__ == "__main__":
     print("Bot started...")
-    executor.start_polling(dp, skip_updates=False)
+    executor.start_polling(dp, skip_updates=True)  # skip_updates=True = ignore anciens messages
