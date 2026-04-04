@@ -1,5 +1,5 @@
 from aiogram import Bot, Dispatcher, types, executor
-from aiogram.types import ParseMode
+from aiogram.types import ParseMode, InlineKeyboardButton, InlineKeyboardMarkup
 import asyncio
 
 API_TOKEN = "TON_TOKEN_ICI"
@@ -22,6 +22,14 @@ async def check_membership(user_id: int):
         print(f"Erreur vérification membre: {e}")
         return False
 
+def join_button():
+    """
+    Créé un bouton inline pour que l'utilisateur confirme qu'il a rejoint le canal
+    """
+    keyboard = InlineKeyboardMarkup()
+    keyboard.add(InlineKeyboardButton("✅ J’ai rejoint", callback_data="joined_channel"))
+    return keyboard
+
 @dp.message_handler(commands=['start'])
 async def start(message: types.Message):
     is_member = await check_membership(message.from_user.id)
@@ -31,28 +39,27 @@ async def start(message: types.Message):
         await message.reply(
             "🚫 Rejoins le canal pour continuer:\n"
             f"https://t.me/{CHANNEL_USERNAME[1:]}\n\n"
-            "Puis renvoie /start après l'avoir rejoint."
+            "Puis clique sur le bouton ci-dessous après l'avoir rejoint.",
+            reply_markup=join_button()
         )
-        # Ajout de l'utilisateur à la liste d'attente
         pending_users.add(message.from_user.id)
 
-@dp.message_handler(commands=['check'])
-async def check(message: types.Message):
-    """
-    Commande pour que l'utilisateur vérifie son statut après avoir rejoint le canal
-    """
-    if message.from_user.id not in pending_users:
-        await message.reply("Vous n'avez pas besoin de vérifier, vous êtes déjà actif.")
+@dp.callback_query_handler(lambda c: c.data == "joined_channel")
+async def joined_channel(callback_query: types.CallbackQuery):
+    user_id = callback_query.from_user.id
+    if user_id not in pending_users:
+        await callback_query.answer("Vous êtes déjà actif !", show_alert=True)
         return
 
-    is_member = await check_membership(message.from_user.id)
+    is_member = await check_membership(user_id)
     if is_member:
-        await message.reply(f"✅ Merci {message.from_user.first_name}, vous avez maintenant accès au bot !")
-        pending_users.remove(message.from_user.id)
+        await bot.send_message(user_id, f"✅ Merci {callback_query.from_user.first_name}, vous avez maintenant accès au bot !")
+        pending_users.remove(user_id)
+        await callback_query.answer("Accès validé !", show_alert=True)
     else:
-        await message.reply(
-            "🚫 Vous n'avez pas encore rejoint le canal.\n"
-            f"Rejoins ici: https://t.me/{CHANNEL_USERNAME[1:]}"
+        await callback_query.answer(
+            "🚫 Vous n'avez pas encore rejoint le canal. Vérifie et clique à nouveau !",
+            show_alert=True
         )
 
 if __name__ == "__main__":
