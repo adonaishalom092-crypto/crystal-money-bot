@@ -44,25 +44,26 @@ conn.commit()
 
 # ========= MESSAGE DESIGN =========
 BOT_DESCRIPTION = """
-<b>💎 QUE PEUT FAIRE CE BOT ?</b>
+<b>🤖 QUE PEUT FAIRE CE BOT ?</b>
 
-🚀 Bienvenue sur <b>CRYSTAL MONEY BOT</b> !
+Bienvenue sur <b>CRYSTAL MONEY BOT</b> 🚀
 
-💰 Gagne de l'argent facilement et légalement directement depuis ton téléphone.
-
-━━━━━━━━━━━━━━━
-
-<b>🔥 COMMENT ÇA MARCHE ?</b>
-
-👥 Invite tes amis → <b>+75 FCFA</b>  
-🎁 Réclame ton bonus → <b>+25 FCFA chaque jour</b>  
+💰 Ce bot vous permet de gagner de l'argent en :
+👥 Parrainant des amis  
+🎁 Réclamant des bonus quotidiens  
 
 ━━━━━━━━━━━━━━━
 
-<b>💸 RETRAIT SIMPLE & RAPIDE</b>
+<b>👀 COMMENT ÇA MARCHE ?</b>
 
-💰 Minimum : <b>500 FCFA</b>  
-📲 Paiements via :  
+➡️ +75 FCFA par invitation  
+➡️ +25 FCFA bonus quotidien  
+
+━━━━━━━━━━━━━━━
+
+⚠️ <b>Retrait Minimum :</b> 500 FCFA  
+
+💳 <b>Mode de retrait :</b>  
 • MTN Money  
 • Moov Money  
 • Orange Money  
@@ -70,25 +71,7 @@ BOT_DESCRIPTION = """
 
 ━━━━━━━━━━━━━━━
 
-⚡ Plus tu es actif, plus tu gagnes !
-
-🔥 Offre limitée : commence aujourd’hui 💸
-"""
-
-WELCOME_MESSAGE = """
-Cher <b>{username}</b> 💥 Bienvenue sur notre plateforme de gains !
-
-💸 Gagne de l’argent facilement et légalement chaque jour :
-
-✅ 25 FCFA chaque matin (bonus quotidien)  
-✅ 75 FCFA par invitation qui réclame son Bonus quotidien  
-
-🚨 IMPORTANT :
-Pour continuer, tu dois rejoindre notre canal officiel 👇
-
-👉 [https://t.me/crystalmoneychannel]
-
-Une fois rejoint, clique sur "✅ Vérifier" pour commencer.
+🔥 Plus tu invites, plus tu gagnes !
 """
 
 # ========= CLAVIERS =========
@@ -104,7 +87,7 @@ def main_keyboard(user_id):
 def channel_keyboard():
     kb = InlineKeyboardMarkup()
     kb.add(InlineKeyboardButton("🔘 Rejoindre le canal", url=f"https://t.me/{CHANNEL_USERNAME[1:]}"))
-    kb.add(InlineKeyboardButton("🔘 Vérifier", callback_data="check"))
+    kb.add(InlineKeyboardButton("✅ Vérifier", callback_data="check"))
     return kb
 
 # ========= HELPERS =========
@@ -128,20 +111,29 @@ async def start(message: types.Message):
     username = message.from_user.first_name
     args = message.get_args()
 
-    cursor.execute("SELECT * FROM users WHERE user_id=?", (user_id,))
-    user = cursor.fetchone()
-    if not user:
-        ref = None
-        if args.isdigit() and int(args) != user_id:
-            ref = int(args)
-        cursor.execute("INSERT INTO users (user_id, referrer_id) VALUES (?, ?)", (user_id, ref))
-        conn.commit()
+    user = get_user(user_id)
 
-    # Envoyer le message “Que peut faire ce bot ?” pour tous les nouveaux utilisateurs
-    await message.answer(BOT_DESCRIPTION, reply_markup=channel_keyboard())
+    # 🔥 Gestion parrainage FIX
+    if user[2] is None and args.isdigit():
+        ref = int(args)
+        if ref != user_id:
+            cursor.execute("UPDATE users SET referrer_id=? WHERE user_id=?", (ref, user_id))
+            conn.commit()
 
-    # Envoyer le message de bienvenue après appui sur /start
-    await message.answer(WELCOME_MESSAGE.format(username=username), reply_markup=channel_keyboard())
+    # 🔥 Message principal (comme PUB PAY BOT)
+    await message.answer(BOT_DESCRIPTION)
+
+    # 🔒 Obligation canal
+    await message.answer(
+        f"""
+<b>👋 Cher {username}</b>
+
+🎯 Pour commencer à gagner de l'argent 💸
+
+⚠️ Tu dois obligatoirement rejoindre notre canal 👇
+""",
+        reply_markup=channel_keyboard()
+    )
 
 # ========= VERIFICATION CANAL =========
 @dp.callback_query_handler(lambda c: c.data == "check")
@@ -150,7 +142,10 @@ async def check(call: types.CallbackQuery):
     try:
         member = await bot.get_chat_member(CHANNEL_USERNAME, user_id)
         if member.status in ["member", "administrator", "creator"]:
-            await call.message.answer("✅ Accès activé !", reply_markup=main_keyboard(user_id))
+            await call.message.answer(
+                "✅ <b>Accès activé !</b>\n\n💰 Tu peux maintenant commencer à gagner 🚀",
+                reply_markup=main_keyboard(user_id)
+            )
         else:
             await call.answer("🚫 Rejoins le canal pour continuer", show_alert=True)
     except:
@@ -165,26 +160,29 @@ async def bonus(message: types.Message):
     if user[6] == 1:
         return await message.answer("🚫 Compte bloqué")
 
-    # Vérifier si l'utilisateur a rejoint le canal
+    # Vérif canal
     try:
         member = await bot.get_chat_member(CHANNEL_USERNAME, user_id)
         if member.status not in ["member", "administrator", "creator"]:
-            return await message.answer("🚫 Tu dois rejoindre le canal pour réclamer ton bonus")
+            return await message.answer("🚫 Rejoins le canal pour réclamer ton bonus")
     except:
-        return await message.answer("Erreur lors de la vérification du canal")
+        return await message.answer("Erreur vérification canal")
 
     today = str(datetime.now().date())
+
     if user[3] == today:
-        return await message.answer("⏳ Déjà réclamé aujourd'hui\nReviens demain 😉")
+        return await message.answer("⏳ Déjà pris aujourd'hui\nReviens demain 😉")
 
-    cursor.execute("UPDATE users SET balance = balance + 25, last_bonus_date=? WHERE user_id=?", (today, user_id))
+    # Bonus utilisateur
+    cursor.execute(
+        "UPDATE users SET balance = balance + 25, last_bonus_date=?, total_bonus = total_bonus + 1 WHERE user_id=?",
+        (today, user_id)
+    )
 
-    # parrainage
-    if user[4] == 0 and user[2]:
-        cursor.execute("UPDATE users SET balance = balance + 75 WHERE user_id=?", (user[2],))
-        cursor.execute("UPDATE users SET total_referrals = total_referrals + 1 WHERE user_id=?", (user[2],))
+    # 🔥 Bonus parrain (corrigé)
+    if user[2]:
+        cursor.execute("UPDATE users SET balance = balance + 75, total_referrals = total_referrals + 1 WHERE user_id=?", (user[2],))
 
-    cursor.execute("UPDATE users SET total_bonus = total_bonus + 1 WHERE user_id=?", (user_id,))
     conn.commit()
     await message.answer("🎁 BONUS REÇU\n\n+25 FCFA 💰")
 
@@ -194,13 +192,22 @@ async def referral(message: types.Message):
     user_id = message.from_user.id
     bot_username = (await bot.get_me()).username
     link = f"https://t.me/{bot_username}?start={user_id}"
-    await message.answer(f"🔗 Ton lien :\n{link}")
+
+    await message.answer(
+        f"""
+👥 <b>Ton lien de parrainage :</b>
+
+{link}
+
+💰 Gagne 75 FCFA par personne invitée !
+"""
+    )
 
 # ========= SOLDE =========
 @dp.message_handler(lambda m: m.text == "💰 Solde")
 async def solde(message: types.Message):
     bal = get_balance(message.from_user.id)
-    await message.answer(f"💰 Solde : {bal} FCFA")
+    await message.answer(f"💰 <b>Solde :</b> {bal} FCFA")
 
 # ========= RETRAIT =========
 user_state = {}
@@ -209,8 +216,9 @@ user_state = {}
 async def retrait(message: types.Message):
     if get_balance(message.from_user.id) < 500:
         return await message.answer("❌ Minimum 500 FCFA")
+
     user_state[message.from_user.id] = "method"
-    await message.answer("1️⃣ MTN\n2️⃣ Orange\n3️⃣ Wave\nChoisis méthode")
+    await message.answer("1️⃣ MTN\n2️⃣ Orange\n3️⃣ Wave\n\nChoisis une méthode :")
 
 @dp.message_handler(lambda m: m.from_user.id in user_state)
 async def process_retrait(message: types.Message):
@@ -220,20 +228,30 @@ async def process_retrait(message: types.Message):
     if state == "method":
         methods = {"1": "MTN", "2": "Orange", "3": "Wave"}
         if message.text not in methods:
-            return await message.answer("Choix invalide")
+            return await message.answer("❌ Choix invalide")
+
         user_state[uid] = {"method": methods[message.text]}
-        await message.answer("Entre ton numéro")
+        await message.answer("📱 Entre ton numéro :")
+
     else:
         method = state["method"]
         phone = message.text
+
         cursor.execute(
             "INSERT INTO withdrawals (user_id, amount, phone, method, status) VALUES (?, ?, ?, ?, ?)",
             (uid, 500, phone, method, "pending")
         )
+
         cursor.execute("UPDATE users SET balance = balance - 500 WHERE user_id=?", (uid,))
         conn.commit()
-        await bot.send_message(ADMIN_ID, f"💸 Retrait\nUser: {uid}\n500 FCFA\n{method}\n{phone}")
+
+        await bot.send_message(
+            ADMIN_ID,
+            f"💸 RETRAIT\nUser: {uid}\nMontant: 500 FCFA\nMéthode: {method}\nNuméro: {phone}"
+        )
+
         del user_state[uid]
+
         await message.answer("✅ Retrait envoyé\n⏳ 24-48h")
 
 # ========= HISTORIQUE =========
@@ -241,11 +259,14 @@ async def process_retrait(message: types.Message):
 async def history(message: types.Message):
     cursor.execute("SELECT amount, status FROM withdrawals WHERE user_id=?", (message.from_user.id,))
     data = cursor.fetchall()
+
     if not data:
-        return await message.answer("Aucun historique")
-    text = "📜 Historique\n\n"
+        return await message.answer("📭 Aucun historique")
+
+    text = "📜 <b>Historique :</b>\n\n"
     for d in data:
         text += f"{d[0]} FCFA - {d[1]}\n"
+
     await message.answer(text)
 
 # ========= ADMIN =========
@@ -253,13 +274,16 @@ async def history(message: types.Message):
 async def admin(message: types.Message):
     if message.from_user.id != ADMIN_ID:
         return
+
     cursor.execute("SELECT COUNT(*) FROM users")
     users = cursor.fetchone()[0]
+
     cursor.execute("SELECT COUNT(*) FROM withdrawals WHERE status='pending'")
     pending = cursor.fetchone()[0]
-    await message.answer(f"👤 {users} utilisateurs\n💸 {pending} retraits en attente")
+
+    await message.answer(f"👤 Utilisateurs : {users}\n💸 Retraits en attente : {pending}")
 
 # ========= RUN =========
 if __name__ == "__main__":
-    print("Bot lancé")
+    print("Bot lancé 🚀")
     executor.start_polling(dp, skip_updates=True)
