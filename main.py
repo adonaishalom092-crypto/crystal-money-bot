@@ -1,46 +1,41 @@
 from aiogram import Bot, Dispatcher, types
-from aiogram.types import ParseMode, InlineKeyboardMarkup, InlineKeyboardButton
+from aiogram.types import ReplyKeyboardMarkup, KeyboardButton
 from aiogram.utils import executor
-import datetime
+from datetime import datetime
 import os
 
-# ⚠️ Le TOKEN et l'ID admin doivent être configurés dans Railway Variables
-API_TOKEN = os.getenv("API_TOKEN")
-ADMIN_ID = int(os.getenv("ADMIN_ID", 0))
-CHANNEL_USERNAME = "@crystalmoneychannel"
+# --- Configuration ---
+API_TOKEN = os.getenv("API_TOKEN")  # Token du bot depuis Railway
+ADMIN_ID = int(os.getenv("ADMIN_ID"))  # ID admin depuis Railway
+CHANNEL_USERNAME = "@crystalmoneychannel"  # Ton canal public
 
-bot = Bot(token=API_TOKEN, parse_mode=ParseMode.HTML)
+bot = Bot(token=API_TOKEN, parse_mode="HTML")
 dp = Dispatcher(bot)
 
-# Base de données simple simulée
-USERS = {}  # {user_id: {"balance": 0, "last_bonus": None, "referrer": None}}
+# --- Base simulée (à remplacer par une vraie BDD plus tard) ---
+USERS = {}  # user_id: {balance, referrer_id, last_bonus_date, total_referrals}
 
-# --- CLAVIER PRINCIPAL ---
-def main_keyboard() -> InlineKeyboardMarkup:
-    keyboard = InlineKeyboardMarkup(row_width=2)
-    keyboard.add(
-        InlineKeyboardButton("🎁 Bonus", callback_data="daily_bonus"),
-        InlineKeyboardButton("👥 Parrainage", callback_data="referral")
-    )
-    keyboard.add(
-        InlineKeyboardButton("💰 Solde", callback_data="balance")
-    )
-    keyboard.add(
-        InlineKeyboardButton("💸 Retrait", callback_data="withdraw")
-    )
-    return keyboard
+# --- Clavier fixe ---
+user_keyboard = ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=False)
+user_keyboard.row(
+    KeyboardButton("🎁 Bonus"), KeyboardButton("👥 Parrainage")
+)
+user_keyboard.row(
+    KeyboardButton("💰 Solde")
+)
+user_keyboard.row(
+    KeyboardButton("💸 Retrait")
+)
+# ligne vide pour pousser le clavier vers le bas
+user_keyboard.row(
+    KeyboardButton(" "), KeyboardButton(" ")
+)
+user_keyboard.row(
+    KeyboardButton("🔘 Rejoindre le canal"), KeyboardButton("✅ Vérifier")
+)
 
-# --- CLAVIER VERIFICATION ---
-def verification_keyboard() -> InlineKeyboardMarkup:
-    keyboard = InlineKeyboardMarkup(row_width=2)
-    keyboard.add(
-        InlineKeyboardButton("🔘 Rejoindre le canal", url=f"https://t.me/{CHANNEL_USERNAME.strip('@')}"),
-        InlineKeyboardButton("🔘 Vérifier", callback_data="check_membership")
-    )
-    return keyboard
-
-# --- MESSAGE DE BIENVENUE ---
-WELCOME_MESSAGE = f"""
+# --- Messages ---
+WELCOME_TEXT = """
 💎 Bienvenue sur Crystal Money Bot
 
 🔥 Gagne facilement et légalement du FCFA chaque jour !
@@ -49,7 +44,6 @@ WELCOME_MESSAGE = f"""
 🎁 Bonus quotidien : 25 FCFA
 👥 Parrainage : 75 FCFA par personne
 
-     🚨
 🚀 Retrait à partir de 500 FCFA
 
 📲 Paiement rapide via :
@@ -58,75 +52,83 @@ WELCOME_MESSAGE = f"""
 - Wave
 - Moov Money
           
-         🚨 IMPORTANT :
+🚨 IMPORTANT :
 Pour continuer, tu dois rejoindre notre canal officiel 👇
 
-👉 [{CHANNEL_USERNAME}]
+👉 [@crystalmoneychannel]
 
 Une fois rejoint, clique sur "✅ Vérifier" pour commencer.
 """
 
-# --- START ---
-@dp.message_handler(commands=["start"])
-async def send_welcome(message: types.Message):
-    user_id = message.from_user.id
+# --- Helpers ---
+def get_user(user_id):
     if user_id not in USERS:
-        USERS[user_id] = {"balance": 0, "last_bonus": None, "referrer": None}
-    await message.answer(WELCOME_MESSAGE, reply_markup=verification_keyboard())
+        USERS[user_id] = {"balance": 0, "referrer_id": None, "last_bonus_date": None, "total_referrals": 0}
+    return USERS[user_id]
 
-# --- VERIFICATION DU CANAL ---
-@dp.callback_query_handler(lambda c: c.data == "check_membership")
-async def check_membership(call: types.CallbackQuery):
-    user_id = call.from_user.id
-    try:
-        member = await bot.get_chat_member(CHANNEL_USERNAME, user_id)
-        if member.status in ["member", "creator", "administrator"]:
-            await call.message.answer("✅ Vérification réussie ! Voici ton menu principal :", reply_markup=main_keyboard())
-        else:
-            await call.answer("🚫 Tu dois rejoindre le canal pour continuer.", show_alert=True)
-    except:
-        await call.answer("🚫 Impossible de vérifier le canal. Rejoins-le d'abord !", show_alert=True)
+def is_joined_channel(member):
+    # ici, on vérifie si l'utilisateur a rejoint le canal
+    return member  # True/False (à remplacer par vérification réelle Telegram API)
 
-# --- GESTION DES BOUTONS ---
-@dp.callback_query_handler(lambda c: c.data in ["daily_bonus", "referral", "balance", "withdraw"])
-async def handle_buttons(call: types.CallbackQuery):
-    user_id = call.from_user.id
-    user = USERS.get(user_id)
-    if not user:
-        USERS[user_id] = {"balance": 0, "last_bonus": None, "referrer": None}
-        user = USERS[user_id]
+# --- Handlers ---
+@dp.message_handler(commands=["start"])
+async def start(message: types.Message):
+    user = get_user(message.from_user.id)
+    await message.answer(WELCOME_TEXT, reply_markup=user_keyboard)
 
-    if call.data == "daily_bonus":
-        today = datetime.date.today()
-        if user["last_bonus"] != today:
-            user["balance"] += 25
-            user["last_bonus"] = today
+@dp.message_handler(lambda m: m.text == "🔘 Rejoindre le canal")
+async def join_channel(message: types.Message):
+    await message.answer(f"Rejoins le canal ici : {CHANNEL_USERNAME}")
 
-            # Parrainage automatique pour le premier bonus
-            if user["referrer"]:
-                referrer = USERS.get(user["referrer"])
-                if referrer:
-                    referrer["balance"] += 75
+@dp.message_handler(lambda m: m.text == "✅ Vérifier")
+async def verify_channel(message: types.Message):
+    # Exemple simple, ici tu peux faire une vraie vérification avec get_chat_member
+    member = True  # Simulé pour test
+    if member:
+        await message.answer("✅ Vérification réussie ! Tu peux maintenant utiliser le bot.")
+    else:
+        await message.answer("🚫 Tu dois rejoindre le canal pour continuer !")
 
-            await call.message.answer("🎁 BONUS QUOTIDIEN\n\nFélicitations ! Tu as reçu : +25 FCFA 💰\n⏳ Reviens demain pour réclamer encore plus !")
-        else:
-            await call.answer("❌ Déjà réclamé aujourd'hui.", show_alert=True)
+@dp.message_handler(lambda m: m.text == "🎁 Bonus")
+async def bonus(message: types.Message):
+    user = get_user(message.from_user.id)
+    today = datetime.now().date()
+    if user["last_bonus_date"] != today:
+        user["balance"] += 25
+        user["last_bonus_date"] = today
+        await message.answer("🎁 BONUS QUOTIDIEN\n\nFélicitations ! Tu as reçu : +25 FCFA 💰\n⏳ Reviens demain pour réclamer encore plus !")
+        # Bonus parrainage si referrer
+        ref_id = user.get("referrer_id")
+        if ref_id and ref_id in USERS:
+            USERS[ref_id]["balance"] += 75
+    else:
+        await message.answer("⏳ Tu as déjà réclamé ton bonus aujourd'hui.")
 
-    elif call.data == "referral":
-        link = f"https://t.me/{bot.username}?start={user_id}"
-        await call.message.answer(f"👥 TON LIEN D’AFFILIATION :\n\nInvite tes amis et gagne 75 FCFA par personne active !\n\n🔗 Ton lien : {link}\n\n💡 Plus tu invites, plus tu gagnes !")
+@dp.message_handler(lambda m: m.text == "👥 Parrainage")
+async def referral(message: types.Message):
+    user_id = message.from_user.id
+    link = f"https://t.me/Wellcashgain_bot?start={user_id}"
+    await message.answer(f"👥 TON LIEN D’AFFILIATION :\n\nInvite tes amis et gagne 75 FCFA par personne active !\n\n🔗 Ton lien : {link}\n\n💡 Plus tu invites, plus tu gagnes !")
 
-    elif call.data == "balance":
-        await call.message.answer(f"💰 TON SOLDE :\n\nMontant actuel : {user['balance']} FCFA\n💸 Minimum de retrait : 500 FCFA")
+@dp.message_handler(lambda m: m.text == "💰 Solde")
+async def balance(message: types.Message):
+    user = get_user(message.from_user.id)
+    await message.answer(f"💰 TON SOLDE :\n\nMontant actuel : {user['balance']} FCFA\n💸 Minimum de retrait : 500 FCFA")
 
-    elif call.data == "withdraw":
-        if user["balance"] >= 500:
-            user["balance"] -= 500  # On simule le retrait
-            await call.message.answer("✅ DEMANDE ENREGISTRÉE\n\nTon retrait est en cours de traitement.\n⏳ Délai : 24 à 48h\nMerci pour ta confiance 🙏")
-        else:
-            await call.message.answer("❌ Solde insuffisant pour le retrait. Minimum 500 FCFA.")
+@dp.message_handler(lambda m: m.text == "💸 Retrait")
+async def withdrawal(message: types.Message):
+    user = get_user(message.from_user.id)
+    if user["balance"] >= 500:
+        await message.answer("💸 RETRAIT\n\nMinimum : 500 FCFA\nChoisis ton mode de paiement :\n1️⃣ MTN Money\n2️⃣ Orange Money\n3️⃣ Wave\n4️⃣ Autre (manuel)\n\nEntre ton numéro après sélection et nom du bénéficiaire")
+    else:
+        await message.answer("❌ Solde insuffisant pour le retrait. Minimum : 500 FCFA")
 
-# --- RUN ---
+@dp.message_handler(lambda m: m.from_user.id == ADMIN_ID)
+async def admin_panel(message: types.Message):
+    # Ajoute ici les boutons spéciaux pour le propriétaire
+    pass
+
+# --- Run bot ---
 if __name__ == "__main__":
     print("Bot started...")
     executor.start_polling(dp, skip_updates=True)
