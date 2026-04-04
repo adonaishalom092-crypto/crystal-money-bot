@@ -1,87 +1,60 @@
-import sqlite3
-import os
-from aiogram import Bot, Dispatcher, types
-from aiogram.utils import executor
-import datetime
+from aiogram import Bot, Dispatcher, types, executor
+from aiogram.types import ParseMode
+import asyncio
 
-API_TOKEN = os.getenv("API_TOKEN")
+API_TOKEN = "TON_TOKEN_ICI"
+CHANNEL_USERNAME = "@crystalmoneychannel"  # Username public du canal
 
-bot = Bot(token=API_TOKEN)
+bot = Bot(token=API_TOKEN, parse_mode=ParseMode.HTML)
 dp = Dispatcher(bot)
 
-conn = sqlite3.connect("bot.db")
-cursor = conn.cursor()
+# Stockage temporaire des utilisateurs en attente
+pending_users = set()
 
-cursor.execute("""
-CREATE TABLE IF NOT EXISTS users (
-    user_id INTEGER PRIMARY KEY,
-    balance INTEGER DEFAULT 0,
-    referrer INTEGER,
-    last_claim TEXT
-)
-""")
-conn.commit()
-
-CHANNEL = "@crystalmoneychannel"
-
-async def check_sub(user_id):
+async def check_membership(user_id: int):
+    """
+    Vérifie si l'utilisateur est membre du canal public
+    """
     try:
-        member = await bot.get_chat_member(CHANNEL, user_id)
-        return member.status in ["member", "administrator", "creator"]
-    except:
+        member = await bot.get_chat_member(CHANNEL_USERNAME, user_id)
+        return member.status not in ['left', 'kicked']
+    except Exception as e:
+        print(f"Erreur vérification membre: {e}")
         return False
 
 @dp.message_handler(commands=['start'])
 async def start(message: types.Message):
-    await message.answer("✅ Bot fonctionne !")
+    is_member = await check_membership(message.from_user.id)
+    if is_member:
+        await message.reply(f"✅ Bonjour {message.from_user.first_name} ! Bienvenue dans le bot.")
+    else:
+        await message.reply(
+            "🚫 Rejoins le canal pour continuer:\n"
+            f"https://t.me/{CHANNEL_USERNAME[1:]}\n\n"
+            "Puis renvoie /start après l'avoir rejoint."
+        )
+        # Ajout de l'utilisateur à la liste d'attente
+        pending_users.add(message.from_user.id)
 
-    if not await check_sub(user_id):
-        await message.answer("🚫 Rejoins le canal pour continuer:\nhttps://t.me/+RBJns9gbyWdiYWYy")
+@dp.message_handler(commands=['check'])
+async def check(message: types.Message):
+    """
+    Commande pour que l'utilisateur vérifie son statut après avoir rejoint le canal
+    """
+    if message.from_user.id not in pending_users:
+        await message.reply("Vous n'avez pas besoin de vérifier, vous êtes déjà actif.")
         return
 
-    cursor.execute("SELECT * FROM users WHERE user_id=?", (user_id,))
-    user = cursor.fetchone()
-
-    if not user:
-        ref = int(args) if args.isdigit() else None
-        cursor.execute("INSERT INTO users (user_id, referrer) VALUES (?, ?)", (user_id, ref))
-        
-        if ref:
-            cursor.execute("UPDATE users SET balance = balance + 75 WHERE user_id=?", (ref,))
-        
-        conn.commit()
-
-    await message.answer("💎 Bienvenue sur Crystal Money Bot\n\nTape /bonus pour commencer")
-
-@dp.message_handler(commands=['bonus'])
-async def bonus(message: types.Message):
-    user_id = message.from_user.id
-    today = str(datetime.date.today())
-
-    cursor.execute("SELECT last_claim FROM users WHERE user_id=?", (user_id,))
-    result = cursor.fetchone()
-
-    if result and result[0] == today:
-        await message.answer("❌ Déjà réclamé aujourd'hui")
-        return
-
-    cursor.execute("UPDATE users SET balance = balance + 25, last_claim=? WHERE user_id=?", (today, user_id))
-    conn.commit()
-
-    await message.answer("🎉 +25 FCFA ajouté")
-
-@dp.message_handler(commands=['solde'])
-async def solde(message: types.Message):
-    cursor.execute("SELECT balance FROM users WHERE user_id=?", (message.from_user.id,))
-    result = cursor.fetchone()
-    balance = result[0] if result else 0
-    await message.answer(f"💰 Solde: {balance} FCFA")
-
-@dp.message_handler(commands=['refer'])
-async def refer(message: types.Message):
-    link = f"https://t.me/wellcashgain_bot?start={message.from_user.id}"
-    await message.answer(f"🔗 Ton lien:\n{link}")
+    is_member = await check_membership(message.from_user.id)
+    if is_member:
+        await message.reply(f"✅ Merci {message.from_user.first_name}, vous avez maintenant accès au bot !")
+        pending_users.remove(message.from_user.id)
+    else:
+        await message.reply(
+            "🚫 Vous n'avez pas encore rejoint le canal.\n"
+            f"Rejoins ici: https://t.me/{CHANNEL_USERNAME[1:]}"
+        )
 
 if __name__ == "__main__":
     print("Bot started...")
-    executor.start_polling(dp, skip_updates=True)
+    executor.start_polling(dp, skip_updates=False)
