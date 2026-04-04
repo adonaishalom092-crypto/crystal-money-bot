@@ -1,63 +1,44 @@
+import os
 from aiogram import Bot, Dispatcher, types, executor
-from aiogram.types import ParseMode, InlineKeyboardButton, InlineKeyboardMarkup
-import asyncio
+from aiogram.types import ParseMode
 
-API_TOKEN = "TON_TOKEN_ICI"
-CHANNEL_USERNAME = "@crystalmoneychannel"
+# Récupération du token depuis les variables d'environnement
+API_TOKEN = os.getenv("API_TOKEN")
 
 bot = Bot(token=API_TOKEN, parse_mode=ParseMode.HTML)
 dp = Dispatcher(bot)
 
-pending_users = set()
+# Username de ton canal public
+CHANNEL_USERNAME = "@crystalmoneychannel"
 
-async def check_membership(user_id: int):
-    try:
-        member = await bot.get_chat_member(CHANNEL_USERNAME, user_id)
-        return member.status not in ['left', 'kicked']
-    except Exception as e:
-        print(f"Erreur vérification membre: {e}")
-        return False
-
-def join_button():
-    keyboard = InlineKeyboardMarkup()
-    keyboard.add(InlineKeyboardButton("✅ J’ai rejoint", callback_data="joined_channel"))
-    return keyboard
-
-@dp.message_handler(commands=['start'])
+# Commande /start
+@dp.message_handler(commands=["start"])
 async def start(message: types.Message):
     user_id = message.from_user.id
-    await message.reply("🤖 Bot démarré... Vérification du canal en cours.")
-    
-    is_member = await check_membership(user_id)
-    if is_member:
-        await message.reply(f"✅ Bonjour {message.from_user.first_name} ! Bienvenue dans le bot.")
-    else:
-        await message.reply(
-            "🚫 Rejoins le canal pour continuer:\n"
-            f"https://t.me/{CHANNEL_USERNAME[1:]}\n\n"
-            "Puis clique sur le bouton ci-dessous après l'avoir rejoint.",
-            reply_markup=join_button()
-        )
-        pending_users.add(user_id)
 
-@dp.callback_query_handler(lambda c: c.data == "joined_channel")
-async def joined_channel(callback_query: types.CallbackQuery):
-    user_id = callback_query.from_user.id
-    if user_id not in pending_users:
-        await callback_query.answer("Vous êtes déjà actif !", show_alert=True)
-        return
+    try:
+        # Vérifier si l'utilisateur est membre du canal
+        member = await bot.get_chat_member(chat_id=CHANNEL_USERNAME, user_id=user_id)
 
-    is_member = await check_membership(user_id)
-    if is_member:
-        await bot.send_message(user_id, f"✅ Merci {callback_query.from_user.first_name}, vous avez maintenant accès au bot !")
-        pending_users.remove(user_id)
-        await callback_query.answer("Accès validé !", show_alert=True)
-    else:
-        await callback_query.answer(
-            "🚫 Vous n'avez pas encore rejoint le canal. Vérifie et clique à nouveau !",
-            show_alert=True
+        if member.status in ["member", "creator", "administrator"]:
+            # L'utilisateur est dans le canal
+            await message.answer(f"✅ Bienvenue {message.from_user.first_name} ! Vous pouvez utiliser le bot.")
+        else:
+            # L'utilisateur n'est pas membre
+            await message.answer(
+                f"🚫 Rejoins le canal pour continuer:\n{CHANNEL_USERNAME}"
+            )
+    except:
+        # Si l'utilisateur n'est pas membre ou autre erreur
+        await message.answer(
+            f"🚫 Rejoins le canal pour continuer:\n{CHANNEL_USERNAME}"
         )
+
+# Message de bienvenue générique si nécessaire
+@dp.message_handler()
+async def echo(message: types.Message):
+    await message.reply("Envie de commencer ? Tape /start pour vérifier l'accès au canal.")
 
 if __name__ == "__main__":
     print("Bot started...")
-    executor.start_polling(dp, skip_updates=True)  # skip_updates=True = ignore anciens messages
+    executor.start_polling(dp, skip_updates=True)
