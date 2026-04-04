@@ -2,7 +2,7 @@ import os
 import sqlite3
 from datetime import datetime
 from aiogram import Bot, Dispatcher, types
-from aiogram.types import ReplyKeyboardMarkup, KeyboardButton, InlineKeyboardMarkup, InlineKeyboardButton
+from aiogram.types import ReplyKeyboardMarkup, InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.utils import executor
 
 # ================= CONFIG =================
@@ -25,7 +25,8 @@ CREATE TABLE IF NOT EXISTS users (
     referrer_id INTEGER,
     last_bonus_date TEXT,
     total_referrals INTEGER DEFAULT 0,
-    total_bonus INTEGER DEFAULT 0
+    total_bonus INTEGER DEFAULT 0,
+    language TEXT
 )
 """)
 
@@ -45,10 +46,10 @@ def main_keyboard(user_id):
     kb = ReplyKeyboardMarkup(resize_keyboard=True)
     kb.row("🎁 Bonus", "👥 Parrainage")
     kb.row("💰 Solde")
-    kb.row("💸 Retrait")
+    kb.row("💸 Retrait", "📜 Historique")
 
     if user_id == ADMIN_ID:
-        kb.row("📊 Admin Panel")
+        kb.row("📊 Admin Panel", "📈 Stats")
 
     return kb
 
@@ -88,13 +89,13 @@ def get_balance(user_id):
 
 # ================= WELCOME =================
 WELCOME_TEXT = """
-💎 Bienvenue sur Crystal Money Bot
+💎 Bienvenue sur <b>Crystal Money Bot</b>
 
 🔥 Gagne facilement et légalement du FCFA chaque jour !
 
 💰 Ce que tu gagnes :
 🎁 Bonus quotidien : 25 FCFA
-👥 Parrainage : 75 FCFA par personne
+👥 Parrainage : 100 FCFA par personne
 
 🚀 Retrait à partir de 500 FCFA
 
@@ -104,10 +105,10 @@ WELCOME_TEXT = """
 - Wave
 - Moov Money
           
-🚨 IMPORTANT :
+🚨 <b>IMPORTANT :</b>
 Rejoins le canal pour continuer 👇
 
-👉 @crystalmoneychannel
+👉 <b>@crystalmoneychannel</b>
 
 Puis clique sur Vérifier
 """
@@ -117,6 +118,7 @@ Puis clique sur Vérifier
 async def start(message: types.Message):
     user_id = message.from_user.id
     args = message.get_args()
+    lang = message.from_user.language_code
 
     cursor.execute("SELECT * FROM users WHERE user_id=?", (user_id,))
     user = cursor.fetchone()
@@ -130,8 +132,8 @@ async def start(message: types.Message):
                 referrer_id = referrer_id
 
         cursor.execute(
-            "INSERT INTO users (user_id, referrer_id) VALUES (?, ?)",
-            (user_id, referrer_id)
+            "INSERT INTO users (user_id, referrer_id, language) VALUES (?, ?, ?)",
+            (user_id, referrer_id, lang)
         )
         conn.commit()
 
@@ -162,18 +164,26 @@ async def bonus(message: types.Message):
     today = str(datetime.now().date())
     last_bonus = user[4]
 
+    # Vérification canal obligatoire
+    try:
+        member = await bot.get_chat_member(CHANNEL_USERNAME, user_id)
+        if member.status not in ["member", "administrator", "creator"]:
+            return await message.answer("🚫 Tu dois rejoindre le canal pour réclamer ton bonus")
+    except:
+        return await message.answer("❌ Erreur vérification canal")
+
     if last_bonus == today:
         return await message.answer("⏳ Déjà réclamé aujourd'hui.\nReviens demain 😉")
 
     update_balance(user_id, 25)
     set_bonus_date(user_id, today)
 
-    # Parrainage (1er bonus seulement)
+    # Parrainage (100 FCFA)
     total_bonus = user[6]
     referrer_id = user[3]
 
     if total_bonus == 0 and referrer_id:
-        update_balance(referrer_id, 75)
+        update_balance(referrer_id, 100)
 
     cursor.execute("UPDATE users SET total_bonus = total_bonus + 1 WHERE user_id=?", (user_id,))
     conn.commit()
@@ -194,15 +204,14 @@ async def referral(message: types.Message):
 
     await message.answer(
         f"👥 TON LIEN D’AFFILIATION :\n\n"
-        f"Invite tes amis et gagne 75 FCFA par personne active !\n\n"
+        f"Invite tes amis et gagne 100 FCFA par personne active !\n\n"
         f"🔗 {link}"
     )
 
 # ================= SOLDE =================
 @dp.message_handler(lambda m: m.text == "💰 Solde")
 async def balance(message: types.Message):
-    user_id = message.from_user.id
-    bal = get_balance(user_id)
+    bal = get_balance(message.from_user.id)
 
     await message.answer(
         f"💰 TON SOLDE :\n\nMontant actuel : {bal} FCFA\n\n💸 Minimum de retrait : 500 FCFA"
@@ -225,9 +234,22 @@ async def withdraw(message: types.Message):
     cursor.execute("UPDATE users SET balance = balance - 500 WHERE user_id=?", (user_id,))
     conn.commit()
 
-    await message.answer(
-        "✅ DEMANDE ENREGISTRÉE\n\n⏳ Délai : 24 à 48h\nMerci 🙏"
-    )
+    await message.answer("✅ DEMANDE ENREGISTRÉE\n\n⏳ Délai : 24 à 48h\nMerci 🙏")
+
+# ================= HISTORIQUE =================
+@dp.message_handler(lambda m: m.text == "📜 Historique")
+async def history(message: types.Message):
+    cursor.execute("SELECT amount, status FROM withdrawals WHERE user_id=?", (message.from_user.id,))
+    data = cursor.fetchall()
+
+    if not data:
+        return await message.answer("📜 Aucun historique")
+
+    text = "📜 HISTORIQUE\n\n"
+    for d in data:
+        text += f"{d[0]} FCFA - {d[1]}\n"
+
+    await message.answer(text)
 
 # ================= ADMIN =================
 @dp.message_handler(lambda m: m.text == "📊 Admin Panel")
@@ -246,6 +268,33 @@ async def admin_panel(message: types.Message):
         f"👤 Utilisateurs : {users}\n"
         f"💸 Retraits en attente : {pending}"
     )
+
+# ================= STATS =================
+@dp.message_handler(lambda m: m.text == "📈 Stats")
+async def stats(message: types.Message):
+    if message.from_user.id != ADMIN_ID:
+        return
+
+    cursor.execute("SELECT COUNT(*) FROM users")
+    total = cursor.fetchone()[0]
+
+    cursor.execute("SELECT COUNT(*) FROM users WHERE total_bonus > 0")
+    active = cursor.fetchone()[0]
+
+    cursor.execute("""
+        SELECT language, COUNT(*) FROM users
+        GROUP BY language
+        ORDER BY COUNT(*) DESC
+        LIMIT 3
+    """)
+    countries = cursor.fetchall()
+
+    text = f"📈 STATISTIQUES\n\n👥 Total : {total}\n🔥 Actifs : {active}\n\n🌍 Top pays :\n"
+
+    for c in countries:
+        text += f"{c[0]} : {c[1]}\n"
+
+    await message.answer(text)
 
 # ================= RUN =================
 if __name__ == "__main__":
