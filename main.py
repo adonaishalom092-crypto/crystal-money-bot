@@ -9,15 +9,18 @@ from aiogram.dispatcher import FSMContext
 from aiogram.dispatcher.filters.state import State, StatesGroup
 from aiogram.contrib.fsm_storage.memory import MemoryStorage
 
+# ✅ AJOUT IMPORT MIDDLEWARE
+from aiogram.dispatcher.middlewares import BaseMiddleware
+from aiogram.dispatcher.handler import CancelHandler
+
 # ================= CONFIG =================
 API_TOKEN = os.getenv("API_TOKEN")
 ADMIN_ID = int(os.getenv("ADMIN_ID"))
 CHANNEL_USERNAME = "@crystalmoneychannel"
 
-# ✅ AJOUT MULTI CHANNELS
 CHANNEL_USERNAMES = [
     "@crystalmoneychannel",
-    # "@autre_channel"  # tu peux ajouter ici
+    # "@autre_channel"
 ]
 
 bot = Bot(token=API_TOKEN, parse_mode="HTML")
@@ -57,6 +60,36 @@ CREATE TABLE IF NOT EXISTS withdrawals (
 """)
 
 conn.commit()
+
+# ================= MIDDLEWARE (AJOUT IMPORTANT) =================
+async def is_user_in_channels(user_id: int):
+    try:
+        for channel in CHANNEL_USERNAMES:
+            member = await bot.get_chat_member(channel, user_id)
+            if member.status not in ["member", "administrator", "creator"]:
+                return False
+        return True
+    except:
+        return False
+
+
+class ChannelCheckMiddleware(BaseMiddleware):
+    async def on_pre_process_message(self, message: types.Message, data: dict):
+        user_id = message.from_user.id
+
+        if message.get_command() == "/start":
+            return
+
+        ok = await is_user_in_channels(user_id)
+
+        if not ok:
+            await message.answer(
+                "🚫 Tu dois rejoindre tous les canaux obligatoires avant d'utiliser le bot."
+            )
+            raise CancelHandler()
+
+
+dp.middleware.setup(ChannelCheckMiddleware())
 
 # ================= KEYBOARDS =================
 def main_keyboard(user_id):
@@ -292,10 +325,7 @@ async def get_name(message: types.Message, state: FSMContext):
         reply_markup=admin_withdraw_keyboard(wid)
     )
 
-    await message.answer(
-        "⏳ Ta demande de retrait est en attente de validation par l’admin."
-    )
-
+    await message.answer("⏳ Ta demande de retrait est en attente de validation par l’admin.")
     await state.finish()
 
 # ================= ADMIN ACTIONS =================
@@ -367,7 +397,7 @@ async def admin_panel(message: types.Message):
         f"⏳ Pending: {pending}"
     )
 
-# ================= STATS (FIX) =================
+# ================= STATS =================
 @dp.message_handler(lambda m: m.text == "📈 Stats")
 async def stats(message: types.Message):
     if message.from_user.id != ADMIN_ID:
