@@ -58,7 +58,7 @@ def main_keyboard(user_id):
 def channel_keyboard():
     kb = InlineKeyboardMarkup()
     for ch in CHANNELS:
-        kb.add(InlineKeyboardButton(f"🔘 Rejoindre {ch}", url=f"https://t.me/{ch.replace('@','')}"))
+        kb.add(InlineKeyboardButton(f"🔘 {ch}", url=f"https://t.me/{ch.replace('@','')}"))
     kb.add(InlineKeyboardButton("✅ Vérifier", callback_data="check_channel"))
     return kb
 
@@ -90,10 +90,10 @@ def get_balance(user_id):
     return cursor.fetchone()[0]
 
 
-def add_referral(ref_id):
+def add_referral(referrer_id):
     cursor.execute(
         "UPDATE users SET total_referrals = total_referrals + 1 WHERE user_id=?",
-        (ref_id,)
+        (referrer_id,)
     )
     conn.commit()
 
@@ -116,7 +116,6 @@ async def start(message: types.Message):
 
     cursor.execute("SELECT * FROM users WHERE user_id=?", (user_id,))
     if not cursor.fetchone():
-
         ref = int(args) if args.isdigit() and int(args) != user_id else None
 
         if ref:
@@ -130,23 +129,17 @@ async def start(message: types.Message):
 
     name = message.from_user.first_name
 
+    # ✅ MESSAGE DE BIENVENUE EN GRAS
     await message.answer(
-        f"👤 <b>Cher(e) {name}</b>,\n\n"
-        "🗽 <b>BIENVENUE SUR L’ESPACE DE GAIN</b>\n"
-        "💎 <b>CRYSTAL MONEY</b> 💎\n\n"
-        "━━━━━━━━━━━━━━━━━━\n\n"
-        "⚠️ <b>IMPORTANT</b>\n"
-        "Tu dois rejoindre le canal pour utiliser le bot.\n\n"
-        "🏅 @crystalmoneychannel\n\n"
-        "━━━━━━━━━━━━━━━━━━\n\n"
-        "1️⃣ Rejoins le canal\n"
-        "2️⃣ Clique sur Vérifier\n"
-        "3️⃣ Commence à gagner 💰\n\n"
-        "🚀 Bonus quotidien + Parrainage actif",
+        f"<b>👤 Cher(e) {name},</b>\n\n"
+        f"<b>🗽 Bienvenue sur l’espace de gain CRYSTAL MONEY 🗽</b>\n\n"
+        f"<b>Il est obligatoire de rejoindre le canal ci-dessous pour bénéficier des services du bot.</b>\n\n"
+        f"<b>🏅 Rejoins 👉 @crystalmoneychannel</b>\n\n"
+        f"<b>Clique sur Vérifier ✅ après avoir rejoint la chaîne.</b>",
         reply_markup=channel_keyboard()
     )
 
-# ================= CHECK =================
+# ================= CHECK CHANNEL =================
 @dp.callback_query_handler(lambda c: c.data == "check_channel")
 async def check_channel(call: types.CallbackQuery):
     if await check_subscription(call.from_user.id):
@@ -160,12 +153,12 @@ async def bonus(message: types.Message):
     user = get_user(message.from_user.id)
 
     if not await check_subscription(message.from_user.id):
-        return await message.answer("🚫 Rejoins le canal")
+        return await message.answer("🚫 Tu dois rejoindre le canal")
 
     today = str(datetime.now().date())
 
     if user[4] == today:
-        return await message.answer("⏳ Déjà récupéré aujourd’hui")
+        return await message.answer("⏳ Bonus déjà récupéré aujourd’hui")
 
     update_balance(message.from_user.id, 100)
     set_bonus_date(message.from_user.id, today)
@@ -174,18 +167,13 @@ async def bonus(message: types.Message):
         update_balance(user[3], 150)
         add_referral(user[3])
 
-    cursor.execute(
-        "UPDATE users SET total_bonus = total_bonus + 1 WHERE user_id=?",
-        (message.from_user.id,)
-    )
+    cursor.execute("UPDATE users SET total_bonus = total_bonus + 1 WHERE user_id=?", (message.from_user.id,))
     conn.commit()
 
     await message.answer(
-        "🎁 <b>BONUS QUOTIDIEN ACTIVÉ</b>\n\n"
-        "💰 +100 FCFA crédité sur ton compte\n\n"
-        "🔥 Reviens chaque jour pour augmenter tes gains\n"
-        "👥 Invite des amis pour gagner encore plus\n\n"
-        "🚀 Astuce : plus tu es actif, plus tu gagnes vite"
+        "🎁 BONUS QUOTIDIEN ACTIVÉ\n\n"
+        "💰 +100 FCFA crédité\n"
+        "🔥 Reviens chaque jour pour gagner plus"
     )
 
 # ================= PARRAINAGE =================
@@ -197,18 +185,15 @@ async def referral(message: types.Message):
     link = f"https://t.me/{bot_username}?start={message.from_user.id}"
 
     await message.answer(
-        f"👥 <b>TON PARRAINAGE</b>\n\n"
-        f"🔗 Lien : {link}\n\n"
-        f"📊 Tu as parrainé : <b>{user[5]}</b> personne(s)\n"
-        f"💰 Gain : 150 FCFA / utilisateur\n\n"
-        "🚀 Continue à inviter pour gagner plus"
+        f"👥 TON LIEN : {link}\n\n"
+        f"📊 Parrainés : {user[5]}"
     )
 
 # ================= SOLDE =================
 @dp.message_handler(lambda m: m.text == "💰 Solde")
 async def balance(message: types.Message):
     bal = get_balance(message.from_user.id)
-    await message.answer(f"💰 Ton solde : <b>{bal} FCFA</b>")
+    await message.answer(f"💰 Solde : {bal} FCFA")
 
 # ================= RETRAIT =================
 @dp.message_handler(lambda m: m.text == "💸 Retrait")
@@ -223,6 +208,7 @@ async def withdraw(message: types.Message):
         "INSERT INTO withdrawals (user_id, amount, status) VALUES (?, ?, ?)",
         (user_id, 500, "pending")
     )
+
     cursor.execute("UPDATE users SET balance = balance - 500 WHERE user_id=?", (user_id,))
     conn.commit()
 
@@ -242,38 +228,6 @@ async def history(message: types.Message):
         text += f"{d[0]} FCFA - {d[1]}\n"
 
     await message.answer(text)
-
-# ================= ADMIN =================
-@dp.message_handler(lambda m: m.text == "📊 Admin Panel")
-async def admin_panel(message: types.Message):
-    if message.from_user.id != ADMIN_ID:
-        return
-
-    cursor.execute("SELECT COUNT(*) FROM users")
-    users = cursor.fetchone()[0]
-
-    cursor.execute("SELECT COUNT(*) FROM withdrawals WHERE status='pending'")
-    pending = cursor.fetchone()[0]
-
-    await message.answer(
-        f"📊 ADMIN\n\n👥 Users: {users}\n💸 Pending: {pending}"
-    )
-
-# ================= STATS =================
-@dp.message_handler(lambda m: m.text == "📈 Stats")
-async def stats(message: types.Message):
-    if message.from_user.id != ADMIN_ID:
-        return
-
-    cursor.execute("SELECT COUNT(*) FROM users")
-    total = cursor.fetchone()[0]
-
-    cursor.execute("SELECT COUNT(*) FROM users WHERE total_bonus > 0")
-    active = cursor.fetchone()[0]
-
-    await message.answer(
-        f"📈 STATS\n\n👥 Total: {total}\n🔥 Actifs: {active}"
-    )
 
 # ================= RUN =================
 if __name__ == "__main__":
