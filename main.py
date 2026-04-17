@@ -57,8 +57,7 @@ def main_keyboard(user_id):
 
 def channel_keyboard():
     kb = InlineKeyboardMarkup()
-    kb.add(InlineKeyboardButton("🔘 Rejoindre le canal", url=f"https://t.me/{CHANNEL_USERNAME.replace('@','')}"))
-    kb.add(InlineKeyboardButton("🔘 Vérifier", callback_data="check_channel"))
+    kb.add(InlineKeyboardButton("✅ Vérifier", callback_data="check_channel"))
     return kb
 
 # ================= HELPERS =================
@@ -90,29 +89,15 @@ def get_balance(user_id):
 
 # ================= WELCOME =================
 WELCOME_TEXT = """
-💎 Bienvenue sur <b>Crystal Money Bot</b>
+<b>Cher(e) {name},</b>
 
-🔥 Gagne facilement et légalement du FCFA chaque jour !
+<b>Bienvenue sur l’espace de gain 🗽CRYSTAL MONEY🗽</b>
 
-💰 Ce que tu gagnes :
-🎁 Bonus quotidien : 100 FCFA
-👥 Parrainage : 150 FCFA par personne
+<b>Il est obligatoire de rejoindre le canal ci-dessous pour bénéficier des services du bot.</b>
 
-🚀 Retrait à partir de 500 FCFA
+<b>👉🏼 @crystalmoneychannel</b>
 
-📲 Paiement rapide via :
-
-MTN Money
-Orange Money
-Wave
-Moov Money
-
-🚨 <b>IMPORTANT :</b>
-Rejoins le canal pour continuer 👇
-
-👉 <b>@crystalmoneychannel</b>
-
-Puis clique sur Vérifier
+<b>Cliquez sur Vérifier ✅ après avoir rejoint le canal.</b>
 """
 
 # ================= START =================
@@ -139,7 +124,12 @@ async def start(message: types.Message):
         )
         conn.commit()
 
-    await message.answer(WELCOME_TEXT, reply_markup=channel_keyboard())
+    name = message.from_user.first_name
+
+    await message.answer(
+        WELCOME_TEXT.format(name=name),
+        reply_markup=channel_keyboard()
+    )
 
 # ================= CHECK CHANNEL =================
 @dp.callback_query_handler(lambda c: c.data == "check_channel")
@@ -179,7 +169,6 @@ async def bonus(message: types.Message):
     update_balance(user_id, 100)
     set_bonus_date(user_id, today)
 
-    # ✅ BONUS PARRAIN (UNE SEULE FOIS)
     if user[3] and user[8] == 0:
         update_balance(user[3], 150)
 
@@ -239,7 +228,6 @@ async def retrait(message: types.Message):
     cursor.execute("UPDATE users SET balance = balance - 500 WHERE user_id=?", (user_id,))
     conn.commit()
 
-    # 🔔 USER NOTIFIED
     await message.answer(
         "⏳ Ta demande de retrait est en attente.\n"
         "Tu seras notifié après validation par l’admin."
@@ -260,7 +248,7 @@ async def history(message: types.Message):
 
     await message.answer(text)
 
-# ================= ADMIN PANEL =================
+# ================= ADMIN =================
 @dp.message_handler(lambda m: m.text == "📊 Admin Panel")
 async def admin_panel(message: types.Message):
     if message.from_user.id != ADMIN_ID:
@@ -270,74 +258,6 @@ async def admin_panel(message: types.Message):
     kb.add(InlineKeyboardButton("📥 Voir retraits", callback_data="admin_withdrawals"))
 
     await message.answer("🛠️ PANEL ADMIN", reply_markup=kb)
-
-# ================= ADMIN WITHDRAW =================
-@dp.callback_query_handler(lambda c: c.data == "admin_withdrawals")
-async def admin_withdrawals(call: types.CallbackQuery):
-    if call.from_user.id != ADMIN_ID:
-        return
-
-    cursor.execute("SELECT id, user_id, amount FROM withdrawals WHERE status='pending'")
-    data = cursor.fetchall()
-
-    if not data:
-        return await call.message.answer("📭 Aucun retrait en attente")
-
-    for w in data:
-        kb = InlineKeyboardMarkup()
-        kb.add(InlineKeyboardButton("✅ Approuver", callback_data=f"approve_{w[0]}"))
-
-        await call.message.answer(
-            f"💸 Retrait ID: {w[0]}\n👤 User: {w[1]}\n💰 {w[2]} FCFA",
-            reply_markup=kb
-        )
-
-# ================= APPROVE =================
-@dp.callback_query_handler(lambda c: c.data.startswith("approve_"))
-async def approve_withdraw(call: types.CallbackQuery):
-    if call.from_user.id != ADMIN_ID:
-        return
-
-    withdrawal_id = int(call.data.split("_")[1])
-
-    cursor.execute("SELECT user_id, amount FROM withdrawals WHERE id=?", (withdrawal_id,))
-    data = cursor.fetchone()
-
-    if not data:
-        return
-
-    user_id, amount = data
-
-    cursor.execute("UPDATE withdrawals SET status='approved' WHERE id=?", (withdrawal_id,))
-    conn.commit()
-
-    try:
-        await bot.send_message(
-            user_id,
-            f"✅ Ton retrait de {amount} FCFA a été approuvé et payé 💰"
-        )
-    except:
-        pass
-
-    await call.message.answer("✅ Retrait approuvé")
-
-# ================= STATS =================
-@dp.message_handler(lambda m: m.text == "📈 Stats")
-async def stats(message: types.Message):
-    if message.from_user.id != ADMIN_ID:
-        return
-
-    cursor.execute("SELECT COUNT(*) FROM users")
-    total_users = cursor.fetchone()[0]
-
-    cursor.execute("SELECT COUNT(*) FROM withdrawals WHERE status='pending'")
-    pending = cursor.fetchone()[0]
-
-    await message.answer(
-        f"📊 STATISTIQUES\n\n"
-        f"👥 Utilisateurs : {total_users}\n"
-        f"💸 Retraits en attente : {pending}"
-    )
 
 # ================= RUN =================
 if __name__ == "__main__":
