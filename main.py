@@ -5,7 +5,6 @@ from aiogram import Bot, Dispatcher, types
 from aiogram.types import ReplyKeyboardMarkup, InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.utils import executor
 
-# ✅ AJOUT FSM
 from aiogram.dispatcher import FSMContext
 from aiogram.dispatcher.filters.state import State, StatesGroup
 from aiogram.contrib.fsm_storage.memory import MemoryStorage
@@ -71,6 +70,15 @@ def channel_keyboard():
     kb.add(InlineKeyboardButton("✅ Vérifier", callback_data="check_channel"))
     return kb
 
+
+def admin_withdraw_keyboard(wid):
+    kb = InlineKeyboardMarkup()
+    kb.add(
+        InlineKeyboardButton("✅ Payé", callback_data=f"wd_paid:{wid}"),
+        InlineKeyboardButton("❌ Refusé", callback_data=f"wd_refused:{wid}")
+    )
+    return kb
+
 # ================= HELPERS =================
 def get_user(user_id):
     cursor.execute("SELECT * FROM users WHERE user_id=?", (user_id,))
@@ -126,8 +134,6 @@ async def start(message: types.Message):
 
         if args.isdigit():
             referrer_id = int(args)
-            if referrer_id != user_id:
-                referrer_id = referrer_id
 
         cursor.execute(
             "INSERT INTO users (user_id, referrer_id, language) VALUES (?, ?, ?)",
@@ -257,30 +263,68 @@ async def get_name(message: types.Message, state: FSMContext):
     number = data['number']
     name = message.text
 
+    amount = 500
+
     cursor.execute(
         "INSERT INTO withdrawals (user_id, amount, status) VALUES (?, ?, ?)",
-        (user_id, 500, "pending")
+        (user_id, amount, "pending")
     )
-    cursor.execute("UPDATE users SET balance = balance - 500 WHERE user_id=?", (user_id,))
     conn.commit()
 
-    # ✅ ENVOI ADMIN
+    wid = cursor.lastrowid
+
     await bot.send_message(
         ADMIN_ID,
         f"📥 NOUVEAU RETRAIT\n\n"
         f"👤 ID: {user_id}\n"
-        f"💰 Montant: 500 FCFA\n"
+        f"💰 Montant: {amount} FCFA\n"
         f"💳 Méthode: {method}\n"
         f"📱 Numéro: {number}\n"
-        f"👤 Nom: {name}"
+        f"👤 Nom: {name}",
+        reply_markup=admin_withdraw_keyboard(wid)
     )
 
     await message.answer(
-        "⏳ Ta demande de retrait est en attente.\n"
-        "Tu seras notifié après validation par l’admin."
+        "⏳ Ta demande de retrait est en attente de validation par l’admin."
     )
 
     await state.finish()
+
+# ================= ADMIN ACTIONS =================
+@dp.callback_query_handler(lambda c: c.data.startswith("wd_paid"))
+async def wd_paid(call: types.CallbackQuery):
+    if call.from_user.id != ADMIN_ID:
+        return
+
+    wid = int(call.data.split(":")[1])
+
+    cursor.execute("UPDATE withdrawals SET status='paid' WHERE id=?", (wid,))
+    conn.commit()
+
+    cursor.execute("SELECT user_id FROM withdrawals WHERE id=?", (wid,))
+    user_id = cursor.fetchone()[0]
+
+    await bot.send_message(user_id, "✅ Ton retrait a été validé et payé 💰")
+    await call.answer("Payé confirmé")
+
+
+@dp.callback_query_handler(lambda c: c.data.startswith("wd_refused"))
+async def wd_refused(call: types.CallbackQuery):
+    if call.from_user.id != ADMIN_ID:
+        return
+
+    wid = int(call.data.split(":")[1])
+
+    cursor.execute("UPDATE withdrawals SET status='refused' WHERE id=?", (wid,))
+
+    cursor.execute("SELECT user_id, amount FROM withdrawals WHERE id=?", (wid,))
+    user_id, amount = cursor.fetchone()
+
+    cursor.execute("UPDATE users SET balance = balance + ? WHERE user_id=?", (amount, user_id))
+    conn.commit()
+
+    await bot.send_message(user_id, "❌ Ton retrait a été refusé. Ton solde a été recrédité.")
+    await call.answer("Refusé confirmé")
 
 # ================= HISTORIQUE =================
 @dp.message_handler(lambda m: m.text == "📜 Historique")
@@ -297,16 +341,23 @@ async def history(message: types.Message):
 
     await message.answer(text)
 
-# ================= ADMIN =================
+# ================= ADMIN PANEL =================
 @dp.message_handler(lambda m: m.text == "📊 Admin Panel")
 async def admin_panel(message: types.Message):
     if message.from_user.id != ADMIN_ID:
         return
 
-    kb = InlineKeyboardMarkup()
-    kb.add(InlineKeyboardButton("📥 Voir retraits", callback_data="admin_withdrawals"))
+    cursor.execute("SELECT COUNT(*) FROM users")
+    users = cursor.fetchone()[0]
 
-    await message.answer("🛠️ PANEL ADMIN", reply_markup=kb)
+    cursor.execute("SELECT COUNT(*) FROM withdrawals WHERE status='pending'")
+    pending = cursor.fetchone()[0]
+
+    await message.answer(
+        f"🛠️ ADMIN PANEL\n\n"
+        f"👥 Users: {users}\n"
+        f"⏳ Pending: {pending}"
+    )
 
 # ================= RUN =================
 if __name__ == "__main__":
