@@ -14,6 +14,12 @@ API_TOKEN = os.getenv("API_TOKEN")
 ADMIN_ID = int(os.getenv("ADMIN_ID"))
 CHANNEL_USERNAME = "@crystalmoneychannel"
 
+# ✅ AJOUT MULTI CHANNELS
+CHANNEL_USERNAMES = [
+    "@crystalmoneychannel",
+    # "@autre_channel"  # tu peux ajouter ici
+]
+
 bot = Bot(token=API_TOKEN, parse_mode="HTML")
 dp = Dispatcher(bot, storage=MemoryStorage())
 
@@ -154,12 +160,13 @@ async def check_channel(call: types.CallbackQuery):
     user_id = call.from_user.id
 
     try:
-        member = await bot.get_chat_member(CHANNEL_USERNAME, user_id)
+        for channel in CHANNEL_USERNAMES:
+            member = await bot.get_chat_member(channel, user_id)
 
-        if member.status in ["member", "administrator", "creator"]:
-            await call.message.answer("✅ Vérification réussie !", reply_markup=main_keyboard(user_id))
-        else:
-            await call.answer("🚫 Rejoins le canal d'abord !", show_alert=True)
+            if member.status not in ["member", "administrator", "creator"]:
+                return await call.answer("🚫 Rejoins tous les canaux d'abord !", show_alert=True)
+
+        await call.message.answer("✅ Vérification réussie !", reply_markup=main_keyboard(user_id))
 
     except:
         await call.answer("❌ Erreur vérification", show_alert=True)
@@ -174,9 +181,10 @@ async def bonus(message: types.Message):
     last_bonus = user[4]
 
     try:
-        member = await bot.get_chat_member(CHANNEL_USERNAME, user_id)
-        if member.status not in ["member", "administrator", "creator"]:
-            return await message.answer("🚫 Tu dois rejoindre le canal pour réclamer ton bonus")
+        for channel in CHANNEL_USERNAMES:
+            member = await bot.get_chat_member(channel, user_id)
+            if member.status not in ["member", "administrator", "creator"]:
+                return await message.answer("🚫 Tu dois rejoindre tous les canaux pour réclamer ton bonus")
     except:
         return await message.answer("❌ Erreur vérification canal")
 
@@ -357,6 +365,28 @@ async def admin_panel(message: types.Message):
         f"🛠️ ADMIN PANEL\n\n"
         f"👥 Users: {users}\n"
         f"⏳ Pending: {pending}"
+    )
+
+# ================= STATS (FIX) =================
+@dp.message_handler(lambda m: m.text == "📈 Stats")
+async def stats(message: types.Message):
+    if message.from_user.id != ADMIN_ID:
+        return
+
+    cursor.execute("SELECT COUNT(*) FROM users")
+    users = cursor.fetchone()[0]
+
+    cursor.execute("SELECT COUNT(*) FROM withdrawals")
+    withdrawals = cursor.fetchone()[0]
+
+    cursor.execute("SELECT SUM(balance) FROM users")
+    total_balance = cursor.fetchone()[0] or 0
+
+    await message.answer(
+        f"📈 STATS\n\n"
+        f"👥 Utilisateurs: {users}\n"
+        f"💸 Retraits: {withdrawals}\n"
+        f"💰 Balance totale: {total_balance} FCFA"
     )
 
 # ================= RUN =================
