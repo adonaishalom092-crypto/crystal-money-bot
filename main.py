@@ -84,7 +84,10 @@ def main_keyboard(user_id):
 
 def channel_keyboard():
     kb = InlineKeyboardMarkup()
-    kb.add(InlineKeyboardButton("🔘 Rejoindre le canal", url=f"https://t.me/{CHANNEL_USERNAME.replace('@','')}"))
+    kb.add(InlineKeyboardButton(
+        "🔘 Rejoindre le canal",
+        url=f"https://t.me/{CHANNEL_USERNAME.replace('@','')}"
+    ))
     kb.add(InlineKeyboardButton("🔘 Vérifier", callback_data="check_channel"))
     return kb
 
@@ -162,102 +165,5 @@ async def bonus(message: types.Message):
     cursor.execute("UPDATE users SET total_bonus = total_bonus + 1 WHERE user_id=?", (user_id,))
     conn.commit()
 
-    await message.answer("🎁 +100 FCFA reçu !")
-
-
-# ================= PARRAINAGE =================
-@dp.message_handler(lambda m: m.text == "👥 Parrainage")
-async def referral(message: types.Message):
-    bot_username = (await bot.get_me()).username
-    link = f"https://t.me/{bot_username}?start={message.from_user.id}"
-
-    cursor.execute("SELECT COUNT(*) FROM users WHERE referrer_id=?", (message.from_user.id,))
-    count = cursor.fetchone()[0]
-
     await message.answer(
-        f"👥 Ton lien :\n{link}\n\n"
-        f"📊 Tu as {count} filleuls"
-    )
-
-
-# ================= SOLDE =================
-@dp.message_handler(lambda m: m.text == "💰 Solde")
-async def balance(message: types.Message):
-    bal = get_balance(message.from_user.id)
-    await message.answer(f"💰 Solde: {bal} FCFA")
-
-
-# ================= RETRAIT =================
-@dp.message_handler(lambda m: m.text == "💸 Retrait")
-async def withdraw(message: types.Message):
-    user_id = message.from_user.id
-    bal = get_balance(user_id)
-
-    if bal < 500:
-        return await message.answer("❌ Min 500 FCFA")
-
-    cursor.execute(
-        "INSERT INTO withdrawals (user_id, amount, status) VALUES (?, ?, ?)",
-        (user_id, 500, "pending")
-    )
-
-    cursor.execute("UPDATE users SET balance = balance - 500 WHERE user_id=?", (user_id,))
-    conn.commit()
-
-    await message.answer("✅ Demande envoyée")
-
-    await bot.send_message(
-        ADMIN_ID,
-        f"🚨 RETRAIT\nUser: {user_id}\nMontant: 500 FCFA\n\n/send {user_id} message"
-    )
-
-
-# ================= HISTORIQUE =================
-@dp.message_handler(lambda m: m.text == "📜 Historique")
-async def history(message: types.Message):
-    cursor.execute("SELECT amount, status FROM withdrawals WHERE user_id=?", (message.from_user.id,))
-    data = cursor.fetchall()
-
-    if not data:
-        return await message.answer("Aucun historique")
-
-    text = "📜 Historique\n\n"
-    for d in data:
-        text += f"{d[0]} - {d[1]}\n"
-
-    await message.answer(text)
-
-
-# ================= ADMIN SEND =================
-@dp.message_handler(commands=["send"])
-async def send(message: types.Message):
-    if message.from_user.id != ADMIN_ID:
-        return
-
-    try:
-        _, user_id, text = message.text.split(" ", 2)
-        await bot.send_message(user_id, f"📩 Admin:\n{text}")
-        await message.reply("Envoyé")
-    except:
-        await message.reply("/send id message")
-
-
-# ================= ADMIN STATS =================
-@dp.message_handler(commands=["stats"])
-async def stats(message: types.Message):
-    if message.from_user.id != ADMIN_ID:
-        return
-
-    cursor.execute("SELECT COUNT(*) FROM users")
-    users = cursor.fetchone()[0]
-
-    cursor.execute("SELECT COUNT(*) FROM withdrawals WHERE status='pending'")
-    pending = cursor.fetchone()[0]
-
-    await message.answer(f"👥 Users: {users}\n💸 Retraits: {pending}")
-
-
-# ================= RUN =================
-if __name__ == "__main__":
-    print("Bot started...")
-    executor.start_polling(dp, skip_updates=True)
+        "🎁 BONUS
