@@ -6,8 +6,13 @@ from aiogram.types import ReplyKeyboardMarkup, InlineKeyboardMarkup, InlineKeybo
 from aiogram.utils import executor
 
 # ================= CONFIG =================
-API_TOKEN = os.getenv("API_TOKEN")
-ADMIN_ID = int(os.getenv("ADMIN_ID"))
+API_TOKEN = os.getenv("API_TOKEN", "")
+
+if not API_TOKEN:
+    print("❌ API_TOKEN manquant")
+    exit()
+
+ADMIN_ID = int(os.getenv("ADMIN_ID", "0"))
 
 CHANNELS = ["@crystalmoneychannel"]
 
@@ -88,7 +93,8 @@ def set_bonus_date(user_id, date):
 
 def get_balance(user_id):
     cursor.execute("SELECT balance FROM users WHERE user_id=?", (user_id,))
-    return cursor.fetchone()[0]
+    row = cursor.fetchone()
+    return row[0] if row else 0
 
 
 def add_referral(referrer_id):
@@ -171,13 +177,18 @@ async def bonus(message: types.Message):
         update_balance(user[3], 150)
         add_referral(user[3])
 
-    cursor.execute("UPDATE users SET total_bonus = total_bonus + 1 WHERE user_id=?", (message.from_user.id,))
+    cursor.execute(
+        "UPDATE users SET total_bonus = total_bonus + 1 WHERE user_id=?",
+        (message.from_user.id,)
+    )
     conn.commit()
 
     await message.answer(
         "🎁 BONUS QUOTIDIEN ACTIVÉ\n\n"
-        "💰 +100 FCFA crédité\n"
-        "🔥 Reviens chaque jour pour gagner plus"
+        "💰 Félicitations ! Tu viens de recevoir 100 FCFA crédités sur ton compte.\n\n"
+        "🔥 Continue de revenir chaque jour pour augmenter tes gains.\n"
+        "👥 Invite des amis pour gagner encore plus avec le système de parrainage.\n\n"
+        "💡 Astuce : plus tu es actif, plus tu gagnes rapidement !"
     )
 
 
@@ -190,8 +201,11 @@ async def referral(message: types.Message):
     link = f"https://t.me/{bot_username}?start={message.from_user.id}"
 
     await message.answer(
-        f"👥 TON LIEN : {link}\n\n"
-        f"📊 Parrainés : {user[5]}"
+        f"👥 TON SYSTÈME DE PARRAINAGE\n\n"
+        f"🔗 Lien : {link}\n\n"
+        f"📊 Tu as déjà parrainé : {user[5]} personne(s)\n\n"
+        f"💰 Gain : 150 FCFA par personne active\n"
+        f"🚀 Plus tu invites, plus tu gagnes !"
     )
 
 
@@ -199,7 +213,7 @@ async def referral(message: types.Message):
 @dp.message_handler(lambda m: m.text == "💰 Solde")
 async def balance(message: types.Message):
     bal = get_balance(message.from_user.id)
-    await message.answer(f"💰 Solde : {bal} FCFA")
+    await message.answer(f"💰 Ton solde actuel est : {bal} FCFA")
 
 
 # ================= RETRAIT =================
@@ -209,7 +223,7 @@ async def withdraw(message: types.Message):
     bal = get_balance(user_id)
 
     if bal < 500:
-        return await message.answer("❌ Minimum 500 FCFA")
+        return await message.answer("❌ Minimum de retrait : 500 FCFA")
 
     cursor.execute(
         "INSERT INTO withdrawals (user_id, amount, status) VALUES (?, ?, ?)",
@@ -219,7 +233,7 @@ async def withdraw(message: types.Message):
     cursor.execute("UPDATE users SET balance = balance - 500 WHERE user_id=?", (user_id,))
     conn.commit()
 
-    await message.answer("✅ Demande envoyée")
+    await message.answer("✅ Demande envoyée avec succès")
 
 
 # ================= HISTORIQUE =================
@@ -229,4 +243,63 @@ async def history(message: types.Message):
     data = cursor.fetchall()
 
     if not data:
-        return await message.answer("📜
+        return await message.answer("📜 Aucun historique")
+
+    text = "📜 HISTORIQUE\n\n"
+    for d in data:
+        text += f"{d[0]} FCFA - {d[1]}\n"
+
+    await message.answer(text)
+
+
+# ================= ADMIN PANEL =================
+@dp.message_handler(lambda m: m.text and "Admin Panel" in m.text)
+async def admin_panel(message: types.Message):
+    if message.from_user.id != ADMIN_ID:
+        return
+
+    cursor.execute("SELECT COUNT(*) FROM users")
+    users = cursor.fetchone()[0]
+
+    cursor.execute("SELECT COUNT(*) FROM withdrawals WHERE status='pending'")
+    pending = cursor.fetchone()[0]
+
+    await message.answer(
+        f"📊 ADMIN PANEL\n\n"
+        f"👤 Utilisateurs : {users}\n"
+        f"💸 Retraits en attente : {pending}"
+    )
+
+
+# ================= STATS =================
+@dp.message_handler(lambda m: m.text and "Stats" in m.text)
+async def stats(message: types.Message):
+    if message.from_user.id != ADMIN_ID:
+        return
+
+    cursor.execute("SELECT COUNT(*) FROM users")
+    total = cursor.fetchone()[0]
+
+    cursor.execute("SELECT COUNT(*) FROM users WHERE total_bonus > 0")
+    active = cursor.fetchone()[0]
+
+    cursor.execute("SELECT COALESCE(language,'unknown'), COUNT(*) FROM users GROUP BY language")
+    langs = cursor.fetchall()
+
+    text = (
+        "📈 STATISTIQUES\n\n"
+        f"👥 Total : {total}\n"
+        f"🔥 Actifs : {active}\n\n"
+        "🌍 Langues :\n"
+    )
+
+    for l in langs:
+        text += f"{l[0]} : {l[1]}\n"
+
+    await message.answer(text)
+
+
+# ================= RUN =================
+if __name__ == "__main__":
+    print("Bot started...")
+    executor.start_polling(dp, skip_updates=True)
