@@ -62,6 +62,7 @@ def channel_keyboard():
     kb.add(InlineKeyboardButton("✅ Vérifier", callback_data="check_channel"))
     return kb
 
+
 # ================= HELPERS =================
 def get_user(user_id):
     cursor.execute("SELECT * FROM users WHERE user_id=?", (user_id,))
@@ -97,6 +98,7 @@ def add_referral(referrer_id):
     )
     conn.commit()
 
+
 # ================= CHECK SUB =================
 async def check_subscription(user_id):
     for ch in CHANNELS:
@@ -107,6 +109,7 @@ async def check_subscription(user_id):
         except:
             return False
     return True
+
 
 # ================= START =================
 @dp.message_handler(commands=["start"])
@@ -129,15 +132,15 @@ async def start(message: types.Message):
 
     name = message.from_user.first_name
 
-    # ✅ MESSAGE DE BIENVENUE EN GRAS
     await message.answer(
-        f"<b>👤 Cher(e) {name},</b>\n\n"
-        f"<b>🗽 Bienvenue sur l’espace de gain CRYSTAL MONEY 🗽</b>\n\n"
-        f"<b>Il est obligatoire de rejoindre le canal ci-dessous pour bénéficier des services du bot.</b>\n\n"
-        f"<b>🏅 Rejoins 👉 @crystalmoneychannel</b>\n\n"
-        f"<b>Clique sur Vérifier ✅ après avoir rejoint la chaîne.</b>",
+        f"👤 Cher(e) {name},\n\n"
+        "🗽 Bienvenue sur l’espace de gain CRYSTAL MONEY 🗽\n\n"
+        "Il est obligatoire de rejoindre le canal ci-dessous pour bénéficier des services du bot.\n\n"
+        "🏅 Rejoins 👉 @crystalmoneychannel\n\n"
+        "Clique sur Vérifier ✅ après avoir rejoint la chaîne.",
         reply_markup=channel_keyboard()
     )
+
 
 # ================= CHECK CHANNEL =================
 @dp.callback_query_handler(lambda c: c.data == "check_channel")
@@ -146,6 +149,7 @@ async def check_channel(call: types.CallbackQuery):
         await call.message.answer("✅ Accès autorisé", reply_markup=main_keyboard(call.from_user.id))
     else:
         await call.answer("🚫 Rejoins le canal", show_alert=True)
+
 
 # ================= BONUS =================
 @dp.message_handler(lambda m: m.text == "🎁 Bonus")
@@ -176,6 +180,7 @@ async def bonus(message: types.Message):
         "🔥 Reviens chaque jour pour gagner plus"
     )
 
+
 # ================= PARRAINAGE =================
 @dp.message_handler(lambda m: m.text == "👥 Parrainage")
 async def referral(message: types.Message):
@@ -189,11 +194,13 @@ async def referral(message: types.Message):
         f"📊 Parrainés : {user[5]}"
     )
 
+
 # ================= SOLDE =================
 @dp.message_handler(lambda m: m.text == "💰 Solde")
 async def balance(message: types.Message):
     bal = get_balance(message.from_user.id)
     await message.answer(f"💰 Solde : {bal} FCFA")
+
 
 # ================= RETRAIT =================
 @dp.message_handler(lambda m: m.text == "💸 Retrait")
@@ -214,6 +221,7 @@ async def withdraw(message: types.Message):
 
     await message.answer("✅ Demande envoyée")
 
+
 # ================= HISTORIQUE =================
 @dp.message_handler(lambda m: m.text == "📜 Historique")
 async def history(message: types.Message):
@@ -221,15 +229,4 @@ async def history(message: types.Message):
     data = cursor.fetchall()
 
     if not data:
-        return await message.answer("📜 Aucun historique")
-
-    text = "📜 HISTORIQUE\n\n"
-    for d in data:
-        text += f"{d[0]} FCFA - {d[1]}\n"
-
-    await message.answer(text)
-
-# ================= RUN =================
-if __name__ == "__main__":
-    print("Bot started...")
-    executor.start_polling(dp, skip_updates=True)
+        return await message.answer("📜
