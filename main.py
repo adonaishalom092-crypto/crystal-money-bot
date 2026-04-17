@@ -5,13 +5,24 @@ from aiogram import Bot, Dispatcher, types
 from aiogram.types import ReplyKeyboardMarkup, InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.utils import executor
 
+# ✅ AJOUT FSM
+from aiogram.dispatcher import FSMContext
+from aiogram.dispatcher.filters.state import State, StatesGroup
+from aiogram.contrib.fsm_storage.memory import MemoryStorage
+
 # ================= CONFIG =================
 API_TOKEN = os.getenv("API_TOKEN")
 ADMIN_ID = int(os.getenv("ADMIN_ID"))
 CHANNEL_USERNAME = "@crystalmoneychannel"
 
 bot = Bot(token=API_TOKEN, parse_mode="HTML")
-dp = Dispatcher(bot)
+dp = Dispatcher(bot, storage=MemoryStorage())
+
+# ================= STATES =================
+class WithdrawState(StatesGroup):
+    method = State()
+    number = State()
+    name = State()
 
 # ================= DATABASE =================
 conn = sqlite3.connect("database.db", check_same_thread=False)
@@ -221,6 +232,31 @@ async def retrait(message: types.Message):
     if bal < 500:
         return await message.answer("❌ Minimum de retrait : 500 FCFA")
 
+    await message.answer("💳 Quel est ton mode de paiement ?")
+    await WithdrawState.method.set()
+
+# ================= FSM =================
+@dp.message_handler(state=WithdrawState.method)
+async def get_method(message: types.Message, state: FSMContext):
+    await state.update_data(method=message.text)
+    await message.answer("📱 Envoie ton numéro avec indicatif")
+    await WithdrawState.next()
+
+@dp.message_handler(state=WithdrawState.number)
+async def get_number(message: types.Message, state: FSMContext):
+    await state.update_data(number=message.text)
+    await message.answer("👤 Nom du bénéficiaire ?")
+    await WithdrawState.next()
+
+@dp.message_handler(state=WithdrawState.name)
+async def get_name(message: types.Message, state: FSMContext):
+    data = await state.get_data()
+
+    user_id = message.from_user.id
+    method = data['method']
+    number = data['number']
+    name = message.text
+
     cursor.execute(
         "INSERT INTO withdrawals (user_id, amount, status) VALUES (?, ?, ?)",
         (user_id, 500, "pending")
@@ -228,10 +264,23 @@ async def retrait(message: types.Message):
     cursor.execute("UPDATE users SET balance = balance - 500 WHERE user_id=?", (user_id,))
     conn.commit()
 
+    # ✅ ENVOI ADMIN
+    await bot.send_message(
+        ADMIN_ID,
+        f"📥 NOUVEAU RETRAIT\n\n"
+        f"👤 ID: {user_id}\n"
+        f"💰 Montant: 500 FCFA\n"
+        f"💳 Méthode: {method}\n"
+        f"📱 Numéro: {number}\n"
+        f"👤 Nom: {name}"
+    )
+
     await message.answer(
         "⏳ Ta demande de retrait est en attente.\n"
         "Tu seras notifié après validation par l’admin."
     )
+
+    await state.finish()
 
 # ================= HISTORIQUE =================
 @dp.message_handler(lambda m: m.text == "📜 Historique")
