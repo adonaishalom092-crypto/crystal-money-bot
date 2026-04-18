@@ -9,30 +9,25 @@ from aiogram.dispatcher import FSMContext
 from aiogram.dispatcher.filters.state import State, StatesGroup
 from aiogram.contrib.fsm_storage.memory import MemoryStorage
 
-# ✅ AJOUT IMPORT MIDDLEWARE
 from aiogram.dispatcher.middlewares import BaseMiddleware
 from aiogram.dispatcher.handler import CancelHandler
 
-# ================= CONFIG =================
 API_TOKEN = os.getenv("API_TOKEN")
 ADMIN_ID = int(os.getenv("ADMIN_ID"))
 CHANNEL_USERNAME = "@crystalmoneychannel"
 
 CHANNEL_USERNAMES = [
     "@crystalmoneychannel",
-    # "@autre_channel"
 ]
 
 bot = Bot(token=API_TOKEN, parse_mode="HTML")
 dp = Dispatcher(bot, storage=MemoryStorage())
 
-# ================= STATES =================
 class WithdrawState(StatesGroup):
     method = State()
     number = State()
     name = State()
 
-# ================= DATABASE =================
 conn = sqlite3.connect("database.db", check_same_thread=False)
 cursor = conn.cursor()
 
@@ -61,7 +56,6 @@ CREATE TABLE IF NOT EXISTS withdrawals (
 
 conn.commit()
 
-# ================= MIDDLEWARE (AJOUT IMPORTANT) =================
 async def is_user_in_channels(user_id: int):
     try:
         for channel in CHANNEL_USERNAMES:
@@ -91,7 +85,6 @@ class ChannelCheckMiddleware(BaseMiddleware):
 
 dp.middleware.setup(ChannelCheckMiddleware())
 
-# ================= KEYBOARDS =================
 def main_keyboard(user_id):
     kb = ReplyKeyboardMarkup(resize_keyboard=True)
     kb.row("🎁 Bonus", "👥 Parrainage")
@@ -118,7 +111,6 @@ def admin_withdraw_keyboard(wid):
     )
     return kb
 
-# ================= HELPERS =================
 def get_user(user_id):
     cursor.execute("SELECT * FROM users WHERE user_id=?", (user_id,))
     user = cursor.fetchone()
@@ -145,7 +137,6 @@ def get_balance(user_id):
     cursor.execute("SELECT balance FROM users WHERE user_id=?", (user_id,))
     return cursor.fetchone()[0]
 
-# ================= WELCOME =================
 WELCOME_TEXT = """
 <b>Cher(e) {name},</b>
 
@@ -158,7 +149,6 @@ WELCOME_TEXT = """
 <b>Cliquez sur Vérifier ✅ après avoir rejoint le canal.</b>
 """
 
-# ================= START =================
 @dp.message_handler(commands=["start"])
 async def start(message: types.Message):
     user_id = message.from_user.id
@@ -187,7 +177,6 @@ async def start(message: types.Message):
         reply_markup=channel_keyboard()
     )
 
-# ================= CHECK CHANNEL =================
 @dp.callback_query_handler(lambda c: c.data == "check_channel")
 async def check_channel(call: types.CallbackQuery):
     user_id = call.from_user.id
@@ -204,7 +193,6 @@ async def check_channel(call: types.CallbackQuery):
     except:
         await call.answer("❌ Erreur vérification", show_alert=True)
 
-# ================= BONUS =================
 @dp.message_handler(lambda m: m.text == "🎁 Bonus")
 async def bonus(message: types.Message):
     user_id = message.from_user.id
@@ -230,15 +218,8 @@ async def bonus(message: types.Message):
     if user[3] and user[8] == 0:
         update_balance(user[3], 150)
 
-        cursor.execute(
-            "UPDATE users SET total_referrals = total_referrals + 1 WHERE user_id=?",
-            (user[3],)
-        )
-
-        cursor.execute(
-            "UPDATE users SET referral_paid = 1 WHERE user_id=?",
-            (user_id,)
-        )
+        cursor.execute("UPDATE users SET total_referrals = total_referrals + 1 WHERE user_id=?", (user[3],))
+        cursor.execute("UPDATE users SET referral_paid = 1 WHERE user_id=?", (user_id,))
 
     cursor.execute("UPDATE users SET total_bonus = total_bonus + 1 WHERE user_id=?", (user_id,))
     conn.commit()
@@ -249,7 +230,6 @@ async def bonus(message: types.Message):
         "⏳ Reviens demain pour réclamer encore plus !"
     )
 
-# ================= PARRAINAGE =================
 @dp.message_handler(lambda m: m.text == "👥 Parrainage")
 async def referral(message: types.Message):
     user = get_user(message.from_user.id)
@@ -264,13 +244,11 @@ async def referral(message: types.Message):
         f"💰 150 FCFA par personne"
     )
 
-# ================= SOLDE =================
 @dp.message_handler(lambda m: m.text == "💰 Solde")
 async def solde(message: types.Message):
     bal = get_balance(message.from_user.id)
     await message.answer(f"💰 TON SOLDE : {bal} FCFA")
 
-# ================= RETRAIT =================
 @dp.message_handler(lambda m: m.text == "💸 Retrait")
 async def retrait(message: types.Message):
     user_id = message.from_user.id
@@ -282,7 +260,6 @@ async def retrait(message: types.Message):
     await message.answer("💳 Quel est ton mode de paiement ?")
     await WithdrawState.method.set()
 
-# ================= FSM =================
 @dp.message_handler(state=WithdrawState.method)
 async def get_method(message: types.Message, state: FSMContext):
     await state.update_data(method=message.text)
@@ -328,7 +305,6 @@ async def get_name(message: types.Message, state: FSMContext):
     await message.answer("⏳ Ta demande de retrait est en attente de validation par l’admin.")
     await state.finish()
 
-# ================= ADMIN ACTIONS =================
 @dp.callback_query_handler(lambda c: c.data.startswith("wd_paid"))
 async def wd_paid(call: types.CallbackQuery):
     if call.from_user.id != ADMIN_ID:
@@ -336,15 +312,20 @@ async def wd_paid(call: types.CallbackQuery):
 
     wid = int(call.data.split(":")[1])
 
+    cursor.execute("SELECT user_id, amount FROM withdrawals WHERE id=?", (wid,))
+    data = cursor.fetchone()
+
+    if not data:
+        return await call.answer("Erreur")
+
+    user_id, amount = data
+
+    cursor.execute("UPDATE users SET balance = balance - ? WHERE user_id=?", (amount, user_id))
     cursor.execute("UPDATE withdrawals SET status='paid' WHERE id=?", (wid,))
     conn.commit()
 
-    cursor.execute("SELECT user_id FROM withdrawals WHERE id=?", (wid,))
-    user_id = cursor.fetchone()[0]
-
     await bot.send_message(user_id, "✅ Ton retrait a été validé et payé 💰")
     await call.answer("Payé confirmé")
-
 
 @dp.callback_query_handler(lambda c: c.data.startswith("wd_refused"))
 async def wd_refused(call: types.CallbackQuery):
@@ -354,7 +335,6 @@ async def wd_refused(call: types.CallbackQuery):
     wid = int(call.data.split(":")[1])
 
     cursor.execute("UPDATE withdrawals SET status='refused' WHERE id=?", (wid,))
-
     cursor.execute("SELECT user_id, amount FROM withdrawals WHERE id=?", (wid,))
     user_id, amount = cursor.fetchone()
 
@@ -364,7 +344,6 @@ async def wd_refused(call: types.CallbackQuery):
     await bot.send_message(user_id, "❌ Ton retrait a été refusé. Ton solde a été recrédité.")
     await call.answer("Refusé confirmé")
 
-# ================= HISTORIQUE =================
 @dp.message_handler(lambda m: m.text == "📜 Historique")
 async def history(message: types.Message):
     cursor.execute("SELECT amount, status FROM withdrawals WHERE user_id=?", (message.from_user.id,))
@@ -379,7 +358,6 @@ async def history(message: types.Message):
 
     await message.answer(text)
 
-# ================= ADMIN PANEL =================
 @dp.message_handler(lambda m: m.text == "📊 Admin Panel")
 async def admin_panel(message: types.Message):
     if message.from_user.id != ADMIN_ID:
@@ -397,7 +375,6 @@ async def admin_panel(message: types.Message):
         f"⏳ Pending: {pending}"
     )
 
-# ================= STATS =================
 @dp.message_handler(lambda m: m.text == "📈 Stats")
 async def stats(message: types.Message):
     if message.from_user.id != ADMIN_ID:
@@ -419,7 +396,36 @@ async def stats(message: types.Message):
         f"💰 Balance totale: {total_balance} FCFA"
     )
 
-# ================= RUN =================
+# ================= SUPPORT CHAT ADMIN =================
+
+@dp.message_handler(lambda message: message.from_user.id != ADMIN_ID, content_types=types.ContentTypes.TEXT)
+async def forward_user_messages(message: types.Message):
+    user_id = message.from_user.id
+    text = message.text
+
+    await bot.send_message(
+        ADMIN_ID,
+        f"📩 Message de l'utilisateur\n\n"
+        f"👤 ID: {user_id}\n"
+        f"💬 Message: {text}"
+    )
+
+@dp.message_handler(commands=["reply"])
+async def admin_reply(message: types.Message):
+    if message.from_user.id != ADMIN_ID:
+        return
+
+    try:
+        args = message.text.split(" ", 2)
+        user_id = int(args[1])
+        reply_text = args[2]
+
+        await bot.send_message(user_id, reply_text)
+        await message.answer("✅ Message envoyé")
+
+    except:
+        await message.answer("❌ Format : /reply ID message")
+
 if __name__ == "__main__":
     print("Bot started...")
     executor.start_polling(dp, skip_updates=True)
