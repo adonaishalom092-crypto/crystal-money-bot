@@ -14,7 +14,7 @@ from aiogram.dispatcher.handler import CancelHandler
 
 API_TOKEN = os.getenv("API_TOKEN")
 ADMIN_ID = int(os.getenv("ADMIN_ID"))
-CHANNEL_USERNAME = "@crystalmoneychannel"
+CHANNEL_USERNAME = "@adonaimoneychannel"
 
 bot = Bot(token=API_TOKEN, parse_mode="HTML")
 dp = Dispatcher(bot, storage=MemoryStorage())
@@ -65,7 +65,7 @@ username TEXT UNIQUE
 
 cursor.execute("SELECT COUNT(*) FROM channels")
 if cursor.fetchone()[0] == 0:
-    cursor.execute("INSERT INTO channels (username) VALUES (?)", ("@crystalmoneychannel",))
+    cursor.execute("INSERT INTO channels (username) VALUES (?)", ("@adonaimoneychannel",))
 
 conn.commit()
 
@@ -164,11 +164,11 @@ def get_balance(user_id):
 WELCOME_TEXT = """
 <b>Cher(e) {name},</b>
 
-<b>Bienvenue sur l'espace de gain 🗽CRYSTAL MONEY🗽</b>
+<b>Bienvenue sur l'espace de gain 🗽ADONAÏ_MONEY🗽</b>
 
 <b>Il est obligatoire de rejoindre le canal ci-dessous pour bénéficier des services du bot.</b>
 
-<b>👉🏼 @crystalmoneychannel</b>
+<b>👉🏼 @adonaimoneychannel</b>
 
 <b>Cliquez sur Vérifier ✅ après avoir rejoint le canal.</b>
 """
