@@ -1,4 +1,3 @@
-import asyncio
 import os
 import sqlite3
 from datetime import datetime
@@ -54,16 +53,6 @@ amount INTEGER,
 status TEXT
 )
 """)
-
-cursor.execute("""
-CREATE TABLE IF NOT EXISTS broadcast_logs (
-id INTEGER PRIMARY KEY AUTOINCREMENT,
-sent INTEGER,
-failed INTEGER,
-date TEXT
-)
-""")
-conn.commit()
 
 conn.commit()
 
@@ -258,18 +247,18 @@ async def retrait(message: types.Message):
 user_id = message.from_user.id
 user = get_user(user_id)
 
-balance = user[2]
-total_referrals = user[5]
+balance = user[2]  
+total_referrals = user[5]  
 
-if balance < 500:
-return await message.answer("❌ Minimum de retrait : 500 FCFA")
+if balance < 500:  
+    return await message.answer("❌ Minimum de retrait : 500 FCFA")  
 
-if total_referrals < 3:
-return await message.answer(
-"❌ Tu dois parrainer au moins 3 personnes avant de pouvoir retirer."
-)
+if total_referrals < 3:  
+    return await message.answer(  
+        "❌ Tu dois parrainer au moins 3 personnes avant de pouvoir retirer."  
+    )  
 
-await message.answer("💳 Quel est ton mode de paiement ?")
+await message.answer("💳 Quel est ton mode de paiement ?")  
 await WithdrawState.method.set()
 
 @dp.message_handler(state=WithdrawState.method)
@@ -370,84 +359,6 @@ for d in data:
 text += f"{d[0]} FCFA - {d[1]}\n"
 
 await message.answer(text)
-
-@dp.message_handler(commands=["broadcast"])
-async def broadcast(message: types.Message):
-if message.from_user.id != ADMIN_ID:
-return
-
-# texte ou reply    
-text = message.get_args()    
-reply = message.reply_to_message    
-
-if not text and not reply:    
-    return await message.answer("❌ Utilisation : /broadcast message ou répondre à un message")    
-
-cursor.execute("SELECT user_id FROM users")    
-users = cursor.fetchall()    
-
-sent = 0    
-failed = 0    
-
-for user in users:    
-    user_id = user[0]    
-
-    try:    
-        await asyncio.sleep(0.05)  # 🔥 anti-ban Telegram    
-
-        # 📌 CAS 1 : message avec média (reply)    
-        if reply:    
-            if reply.photo:    
-                await bot.send_photo(    
-                    user_id,    
-                    reply.photo[-1].file_id,    
-                    caption=reply.caption or ""    
-                )    
-
-            elif reply.video:    
-                await bot.send_video(    
-                    user_id,    
-                    reply.video.file_id,    
-                    caption=reply.caption or ""    
-                )    
-
-            else:    
-                await bot.copy_message(user_id, ADMIN_ID, reply.message_id)    
-
-        # 📌 CAS 2 : message texte simple    
-        else:    
-            if "|" in text:    
-                # bouton simple format: message | texte bouton | url    
-                parts = text.split("|")    
-                msg = parts[0].strip()    
-                btn_text = parts[1].strip()    
-                btn_url = parts[2].strip()    
-
-                kb = InlineKeyboardMarkup().add(    
-                    InlineKeyboardButton(btn_text, url=btn_url)    
-                )    
-
-                await bot.send_message(user_id, msg, reply_markup=kb)    
-            else:    
-                await bot.send_message(user_id, f"📢 MESSAGE IMPORTANT\n\n{text}")    
-
-        sent += 1    
-
-    except:    
-        failed += 1    
-
-# 📊 LOG ADMIN    
-await message.answer(    
-    f"✅ BROADCAST TERMINÉ\n\n"    
-    f"✔ Envoyés : {sent}\n"    
-    f"❌ Échecs : {failed}"    
-)    
-
-cursor.execute(    
-    "INSERT INTO broadcast_logs (sent, failed, date) VALUES (?, ?, ?)",    
-    (sent, failed, str(datetime.now()))    
-)    
-conn.commit()
 
 @dp.message_handler(lambda m: m.text == "📊 Admin Panel")
 async def admin_panel(message: types.Message):
