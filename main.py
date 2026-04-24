@@ -16,14 +16,12 @@ API_TOKEN = os.getenv("API_TOKEN")
 ADMIN_ID = int(os.getenv("ADMIN_ID"))
 CHANNEL_USERNAME = "@crystalmoneychannel"
 
-CHANNEL_USERNAMES = [
-    "@crystalmoneychannel",
-]
+CHANNEL_USERNAMES = ["@crystalmoneychannel"]
 
 bot = Bot(token=API_TOKEN, parse_mode="HTML")
 dp = Dispatcher(bot, storage=MemoryStorage())
 
-# ================== FSM ==================
+# ================= FSM =================
 
 class WithdrawState(StatesGroup):
     amount = State()
@@ -31,7 +29,7 @@ class WithdrawState(StatesGroup):
     number = State()
     name = State()
 
-# ================== DATABASE ==================
+# ================= DATABASE =================
 
 conn = sqlite3.connect("database.db", check_same_thread=False)
 cursor = conn.cursor()
@@ -61,14 +59,29 @@ CREATE TABLE IF NOT EXISTS withdrawals (
 
 conn.commit()
 
-# ================== SAFE BALANCE ==================
+# ================= SAFE BALANCE =================
 
 def get_balance(user_id):
     cursor.execute("SELECT balance FROM users WHERE user_id=?", (user_id,))
-    result = cursor.fetchone()
-    return result[0] if result else 0
+    r = cursor.fetchone()
+    return r[0] if r else 0
 
-# ================== CHANNEL CHECK ==================
+# ================= RESET FSM (IMPORTANT FIX) =================
+
+@dp.message_handler(state="*")
+async def cancel_fsm(message: types.Message, state: FSMContext):
+    # permet de sortir du FSM automatiquement
+    if message.text in [
+        "💰 Solde",
+        "👥 Parrainage",
+        "📜 Historique",
+        "📊 Admin Panel",
+        "📈 Stats",
+        "🎁 Bonus"
+    ]:
+        await state.finish()
+
+# ================= CHANNEL CHECK =================
 
 async def is_user_in_channels(user_id: int):
     try:
@@ -88,17 +101,13 @@ class ChannelCheckMiddleware(BaseMiddleware):
         if message.get_command() == "/start":
             return
 
-        ok = await is_user_in_channels(user_id)
-
-        if not ok:
-            await message.answer(
-                "🚫 Tu dois rejoindre tous les canaux obligatoires avant d'utiliser le bot."
-            )
+        if not await is_user_in_channels(user_id):
+            await message.answer("🚫 Tu dois rejoindre tous les canaux obligatoires avant d'utiliser le bot.")
             raise CancelHandler()
 
 dp.middleware.setup(ChannelCheckMiddleware())
 
-# ================== KEYBOARDS ==================
+# ================= KEYBOARDS =================
 
 def main_keyboard(user_id):
     kb = ReplyKeyboardMarkup(resize_keyboard=True)
@@ -126,18 +135,18 @@ def admin_withdraw_keyboard(wid):
     )
     return kb
 
-# ================== USERS ==================
+# ================= USERS =================
 
 def get_user(user_id):
     cursor.execute("SELECT * FROM users WHERE user_id=?", (user_id,))
-    user = cursor.fetchone()
+    u = cursor.fetchone()
 
-    if not user:
+    if not u:
         cursor.execute("INSERT INTO users (user_id) VALUES (?)", (user_id,))
         conn.commit()
         return get_user(user_id)
 
-    return user
+    return u
 
 
 def update_balance(user_id, amount):
@@ -149,7 +158,7 @@ def set_bonus_date(user_id, date):
     cursor.execute("UPDATE users SET last_bonus_date=? WHERE user_id=?", (date, user_id))
     conn.commit()
 
-# ================== START ==================
+# ================= START =================
 
 WELCOME_TEXT = """
 <b>Cher(e) {name},</b>
@@ -163,8 +172,10 @@ WELCOME_TEXT = """
 <b>Cliquez sur Vérifier ✅ après avoir rejoint le canal.</b>
 """
 
-@dp.message_handler(commands=["start"])
-async def start(message: types.Message):
+@dp.message_handler(commands=["start"], state="*")
+async def start(message: types.Message, state: FSMContext):
+    await state.finish()
+
     user_id = message.from_user.id
     args = message.get_args()
     lang = message.from_user.language_code
@@ -173,11 +184,10 @@ async def start(message: types.Message):
     user = cursor.fetchone()
 
     if not user:
-        referrer_id = int(args) if args.isdigit() else None
-
+        ref = int(args) if args.isdigit() else None
         cursor.execute(
             "INSERT INTO users (user_id, referrer_id, language) VALUES (?, ?, ?)",
-            (user_id, referrer_id, lang)
+            (user_id, ref, lang)
         )
         conn.commit()
 
@@ -186,177 +196,42 @@ async def start(message: types.Message):
         reply_markup=channel_keyboard()
     )
 
-# ================== CHECK CHANNEL ==================
+# ================= CHECK CHANNEL =================
 
 @dp.callback_query_handler(lambda c: c.data == "check_channel")
 async def check_channel(call: types.CallbackQuery):
     user_id = call.from_user.id
 
     try:
-        for channel in CHANNEL_USERNAMES:
-            member = await bot.get_chat_member(channel, user_id)
-
-            if member.status not in ["member", "administrator", "creator"]:
-                return await call.answer("🚫 Rejoins tous les canaux d'abord !", show_alert=True)
+        for c in CHANNEL_USERNAMES:
+            m = await bot.get_chat_member(c, user_id)
+            if m.status not in ["member", "administrator", "creator"]:
+                return await call.answer("🚫 Rejoins tous les canaux", show_alert=True)
 
         await call.message.answer("✅ Vérification réussie !", reply_markup=main_keyboard(user_id))
 
     except:
-        await call.answer("❌ Erreur vérification", show_alert=True)
+        await call.answer("❌ Erreur")
 
-# ================== BONUS ==================
+# ================= BONUS =================
 
-@dp.message_handler(lambda m: m.text == "🎁 Bonus")
-async def bonus(message: types.Message):
+@dp.message_handler(lambda m: m.text == "🎁 Bonus", state="*")
+async def bonus(message: types.Message, state: FSMContext):
+    await state.finish()
+
     user_id = message.from_user.id
-    user = get_user(user_id)
+    u = get_user(user_id)
 
     today = str(datetime.now().date())
-    last_bonus = user[4]
-
-    if last_bonus == today:
-        return await message.answer("⏳ Déjà réclamé aujourd'hui.\nReviens demain 😉")
+    if u[4] == today:
+        return await message.answer("⏳ Déjà pris aujourd’hui")
 
     update_balance(user_id, 100)
     set_bonus_date(user_id, today)
 
-    await message.answer("🎁 BONUS QUOTIDIEN\n\nFélicitations ! Tu as reçu :\n+100 FCFA 💰")
+    await message.answer("🎁 +100 FCFA reçu")
 
-# ================== SOLDE ==================
+# ================= SOLDE =================
 
-@dp.message_handler(lambda m: m.text == "💰 Solde")
-async def solde(message: types.Message):
-    await message.answer(f"💰 TON SOLDE : {get_balance(message.from_user.id)} FCFA")
-
-# ================== RETRAIT STABLE ==================
-
-@dp.message_handler(lambda m: m.text == "💸 Retrait")
-async def retrait(message: types.Message):
-    bal = get_balance(message.from_user.id)
-
-    if bal < 500:
-        return await message.answer("❌ Minimum de retrait : 500 FCFA")
-
-    await message.answer("💰 Quel montant veux-tu retirer ?")
-    await WithdrawState.amount.set()
-
-
-@dp.message_handler(state=WithdrawState.amount)
-async def get_amount(message: types.Message, state: FSMContext):
-
-    if not message.text.isdigit():
-        return await message.answer("❌ Montant invalide")
-
-    amount = int(message.text)
-    bal = get_balance(message.from_user.id)
-
-    if amount < 500:
-        return await message.answer("❌ Minimum 500 FCFA")
-
-    if amount > bal:
-        return await message.answer("❌ Solde insuffisant")
-
-    await state.update_data(amount=amount)
-    await message.answer("💳 Mode de paiement ?")
-    await WithdrawState.next()
-
-
-@dp.message_handler(state=WithdrawState.method)
-async def get_method(message: types.Message, state: FSMContext):
-    await state.update_data(method=message.text)
-    await message.answer("📱 Numéro ?")
-    await WithdrawState.next()
-
-
-@dp.message_handler(state=WithdrawState.number)
-async def get_number(message: types.Message, state: FSMContext):
-    await state.update_data(number=message.text)
-    await message.answer("👤 Nom ?")
-    await WithdrawState.next()
-
-
-@dp.message_handler(state=WithdrawState.name)
-async def get_name(message: types.Message, state: FSMContext):
-    data = await state.get_data()
-
-    user_id = message.from_user.id
-    amount = data['amount']
-    method = data['method']
-    number = data['number']
-    name = message.text
-
-    # 🔥 Déduction immédiate
-    cursor.execute(
-        "UPDATE users SET balance = balance - ? WHERE user_id=?",
-        (amount, user_id)
-    )
-
-    cursor.execute(
-        "INSERT INTO withdrawals (user_id, amount, status) VALUES (?, ?, 'pending')",
-        (user_id, amount)
-    )
-
-    conn.commit()
-    wid = cursor.lastrowid
-
-    await bot.send_message(
-        ADMIN_ID,
-        f"📥 NOUVEAU RETRAIT\n\n👤 ID: {user_id}\n💰 {amount} FCFA\n💳 {method}\n📱 {number}\n👤 {name}",
-        reply_markup=admin_withdraw_keyboard(wid)
-    )
-
-    await message.answer("⏳ Demande envoyée")
-    await state.finish()
-
-# ================== ADMIN PAY ==================
-
-@dp.callback_query_handler(lambda c: c.data.startswith("wd_paid"))
-async def wd_paid(call: types.CallbackQuery):
-    if call.from_user.id != ADMIN_ID:
-        return
-
-    wid = int(call.data.split(":")[1])
-
-    cursor.execute("UPDATE withdrawals SET status='paid' WHERE id=?", (wid,))
-    conn.commit()
-
-    cursor.execute("SELECT user_id FROM withdrawals WHERE id=?", (wid,))
-    user_id = cursor.fetchone()[0]
-
-    await bot.send_message(user_id, "✅ Ton retrait a été payé 💰")
-    await call.answer("OK")
-
-# ================== ADMIN REFUSE ==================
-
-@dp.callback_query_handler(lambda c: c.data.startswith("wd_refused"))
-async def wd_refused(call: types.CallbackQuery):
-    if call.from_user.id != ADMIN_ID:
-        return
-
-    wid = int(call.data.split(":")[1])
-
-    cursor.execute("SELECT user_id, amount FROM withdrawals WHERE id=?", (wid,))
-    data = cursor.fetchone()
-
-    if not data:
-        return await call.answer("Erreur")
-
-    user_id, amount = data
-
-    cursor.execute("UPDATE withdrawals SET status='refused' WHERE id=?", (wid,))
-
-    cursor.execute(
-        "UPDATE users SET balance = balance + ? WHERE user_id=?",
-        (amount, user_id)
-    )
-
-    conn.commit()
-
-    await bot.send_message(user_id, "❌ Retrait refusé → remboursé")
-    await call.answer("Refusé")
-
-# ================== RUN ==================
-
-if __name__ == "__main__":
-    print("Bot started...")
-    executor.start_polling(dp, skip_updates=True)
+@dp.message_handler(lambda m: m.text == "💰 Solde", state="*")
+async def solde(message: types.Message, state: FSM
