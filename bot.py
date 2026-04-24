@@ -613,4 +613,37 @@ async def delete_channel(call: types.CallbackQuery):
     content_types=types.ContentTypes.TEXT,
     state=None
 )
-async def forward_user_messages(message: 
+async def forward_user_messages(message: types.Message):
+    user_id = message.from_user.id
+    text = message.text
+
+    # FIX: try/except si l'admin a bloqué le bot
+    try:
+        await bot.send_message(
+            ADMIN_ID,
+            f"📩 Message de l'utilisateur\n\n"
+            f"👤 ID: {user_id}\n"
+            f"💬 Message: {text}"
+        )
+    except Exception as e:
+        print(f"[ERREUR] Impossible de transmettre le message à l'admin : {e}")
+
+@dp.message_handler(commands=["reply"])
+async def admin_reply(message: types.Message):
+    if message.from_user.id != ADMIN_ID:
+        return
+
+    try:
+        args = message.text.split(" ", 2)
+        user_id = int(args[1])
+        reply_text = args[2]
+
+        await bot.send_message(user_id, reply_text)
+        await message.answer("✅ Message envoyé")
+
+    except:
+        await message.answer("❌ Format : /reply ID message")
+
+if __name__ == "__main__":
+    print("Bot started...")
+    executor.start_polling(dp, skip_updates=True)
