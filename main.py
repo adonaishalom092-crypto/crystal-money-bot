@@ -14,7 +14,7 @@ from aiogram.dispatcher.middlewares import BaseMiddleware
 from aiogram.dispatcher.handler import CancelHandler
 
 API_TOKEN = os.getenv("API_TOKEN")
-ADMIN_ID = int(os.getenv("ADMIN_ID"))
+ADMIN_ID = int(os.getenv("ADMIN_ID", "0"))
 CHANNEL_USERNAME = "@crystalmoneychannel"
 
 CHANNEL_USERNAMES = [
@@ -390,8 +390,6 @@ async def broadcast(message: types.Message):
 if message.from_user.id != ADMIN_ID:
 return
 
-texte ou reply
-
 text = message.get_args()
 reply = message.reply_to_message
 
@@ -408,52 +406,49 @@ for user in users:
 user_id = user[0]
 
 try:
-await asyncio.sleep(0.05)  # 🔥 anti-ban Telegram
+await asyncio.sleep(0.05)
 
-📌 CAS 1 : message avec média (reply)
+# CAS 1 : message avec média        
+if reply:        
+    if reply.photo:        
+        await bot.send_photo(        
+            user_id,        
+            reply.photo[-1].file_id,        
+            caption=reply.caption or ""        
+        )        
+    elif reply.video:        
+        await bot.send_video(        
+            user_id,        
+            reply.video.file_id,        
+            caption=reply.caption or ""        
+        )        
+    else:        
+        await bot.copy_message(user_id, ADMIN_ID, reply.message_id)        
 
-if reply:
-if reply.photo:
-await bot.send_photo(
-user_id,
-reply.photo[-1].file_id,
-caption=reply.caption or ""
-)
+# CAS 2 : message texte        
+else:        
+    if "|" in text:        
+        parts = text.split("|")        
 
-elif reply.video:                
-    await bot.send_video(                
-        user_id,                
-        reply.video.file_id,                
-        caption=reply.caption or ""                
-    )                
-    
-else:                
-    await bot.copy_message(user_id, ADMIN_ID, reply.message_id)
+        if len(parts) < 3:        
+            continue        
 
-📌 CAS 2 : message texte simple
+        msg = parts[0].strip()        
+        btn_text = parts[1].strip()        
+        btn_url = parts[2].strip()        
 
-else:
-if "|" in text:
-# bouton simple format: message | texte bouton | url
-parts = text.split("|")
-msg = parts[0].strip()
-btn_text = parts[1].strip()
-btn_url = parts[2].strip()
+        kb = InlineKeyboardMarkup().add(        
+            InlineKeyboardButton(btn_text, url=btn_url)        
+        )        
 
-kb = InlineKeyboardMarkup().add(                
-        InlineKeyboardButton(btn_text, url=btn_url)                
-    )                
-    
-    await bot.send_message(user_id, msg, reply_markup=kb)                
-else:                
-    await bot.send_message(user_id, f"📢 MESSAGE IMPORTANT\n\n{text}")
+        await bot.send_message(user_id, msg, reply_markup=kb)        
+    else:        
+        await bot.send_message(user_id, f"📢 MESSAGE IMPORTANT\n\n{text}")        
 
 sent += 1
 
 except:
 failed += 1
-
-📊 LOG ADMIN
 
 await message.answer(
 f"✅ BROADCAST TERMINÉ\n\n"
@@ -512,11 +507,11 @@ async def forward_user_messages(message: types.Message):
 user_id = message.from_user.id
 text = message.text
 
-await bot.send_message(
-ADMIN_ID,
-f"📩 Message de l'utilisateur\n\n"
-f"👤 ID: {user_id}\n"
-f"💬 Message: {text}"
+await bot.send_message(    
+    ADMIN_ID,    
+    f"📩 Message de l'utilisateur\n\n"    
+    f"👤 ID: {user_id}\n"    
+    f"💬 Message: {text}"    
 )
 
 @dp.message_handler(commands=["reply"])
@@ -524,16 +519,16 @@ async def admin_reply(message: types.Message):
 if message.from_user.id != ADMIN_ID:
 return
 
-try:
-args = message.text.split(" ", 2)
-user_id = int(args[1])
-reply_text = args[2]
+try:    
+    args = message.text.split(" ", 2)    
+    user_id = int(args[1])    
+    reply_text = args[2]    
 
-await bot.send_message(user_id, reply_text)
-await message.answer("✅ Message envoyé")
+    await bot.send_message(user_id, reply_text)    
+    await message.answer("✅ Message envoyé")    
 
-except:
-await message.answer("❌ Format : /reply ID message")
+except:    
+    await message.answer("❌ Format : /reply ID message")
 
 if name == "main":
 print("Bot started...")
