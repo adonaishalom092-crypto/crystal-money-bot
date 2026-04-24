@@ -16,10 +16,6 @@ API_TOKEN = os.getenv("API_TOKEN")
 ADMIN_ID = int(os.getenv("ADMIN_ID"))
 CHANNEL_USERNAME = "@crystalmoneychannel"
 
-CHANNEL_USERNAMES = [
-"@crystalmoneychannel",
-]
-
 bot = Bot(token=API_TOKEN, parse_mode="HTML")
 dp = Dispatcher(bot, storage=MemoryStorage())
 
@@ -27,6 +23,12 @@ class WithdrawState(StatesGroup):
     method = State()
     number = State()
     name = State()
+
+class BroadcastState(StatesGroup):
+    message = State()
+
+class AddChannelState(StatesGroup):
+    username = State()
 
 conn = sqlite3.connect("database.db", check_same_thread=False)
 cursor = conn.cursor()
@@ -54,11 +56,26 @@ status TEXT
 )
 """)
 
+cursor.execute("""
+CREATE TABLE IF NOT EXISTS channels (
+id INTEGER PRIMARY KEY AUTOINCREMENT,
+username TEXT UNIQUE
+)
+""")
+
+cursor.execute("SELECT COUNT(*) FROM channels")
+if cursor.fetchone()[0] == 0:
+    cursor.execute("INSERT INTO channels (username) VALUES (?)", ("@crystalmoneychannel",))
+
 conn.commit()
+
+def get_channels():
+    cursor.execute("SELECT username FROM channels")
+    return [row[0] for row in cursor.fetchall()]
 
 async def is_user_in_channels(user_id: int):
     try:
-        for channel in CHANNEL_USERNAMES:
+        for channel in get_channels():
             member = await bot.get_chat_member(channel, user_id)
             if member.status not in ["member", "administrator", "creator"]:
                 return False
@@ -76,8 +93,13 @@ class ChannelCheckMiddleware(BaseMiddleware):
         ok = await is_user_in_channels(user_id)
 
         if not ok:
+            channels = get_channels()
+            channels_text = "\n".join([f"👉🏼 {ch}" for ch in channels])
             await message.answer(
-                "🚫 Tu dois rejoindre tous les canaux obligatoires avant d'utiliser le bot."
+                f"🚫 Tu dois rejoindre tous les canaux obligatoires avant d'utiliser le bot.\n\n"
+                f"{channels_text}\n\n"
+                f"Clique sur Vérifier ✅ après avoir rejoint.",
+                reply_markup=channel_keyboard()
             )
             raise CancelHandler()
 
@@ -91,6 +113,7 @@ def main_keyboard(user_id):
 
     if user_id == ADMIN_ID:
         kb.row("📊 Admin Panel", "📈 Stats")
+        kb.row("📢 Broadcast", "📡 Gérer Canaux")
 
     return kb
 
@@ -105,6 +128,14 @@ def admin_withdraw_keyboard(wid):
         InlineKeyboardButton("✅ Payé", callback_data=f"wd_paid:{wid}"),
         InlineKeyboardButton("❌ Refusé", callback_data=f"wd_refused:{wid}")
     )
+    return kb
+
+def manage_channels_keyboard():
+    kb = InlineKeyboardMarkup()
+    channels = get_channels()
+    for ch in channels:
+        kb.add(InlineKeyboardButton(f"🗑 Supprimer {ch}", callback_data=f"del_channel:{ch}"))
+    kb.add(InlineKeyboardButton("➕ Ajouter un canal", callback_data="add_channel"))
     return kb
 
 def get_user(user_id):
@@ -175,7 +206,7 @@ async def check_channel(call: types.CallbackQuery):
     user_id = call.from_user.id
 
     try:
-        for channel in CHANNEL_USERNAMES:
+        for channel in get_channels():
             member = await bot.get_chat_member(channel, user_id)
 
             if member.status not in ["member", "administrator", "creator"]:
@@ -195,7 +226,7 @@ async def bonus(message: types.Message):
     last_bonus = user[4]
 
     try:
-        for channel in CHANNEL_USERNAMES:
+        for channel in get_channels():
             member = await bot.get_chat_member(channel, user_id)
             if member.status not in ["member", "administrator", "creator"]:
                 return await message.answer("🚫 Tu dois rejoindre tous les canaux pour réclamer ton bonus")
@@ -246,9 +277,17 @@ async def solde(message: types.Message):
 async def retrait(message: types.Message):
     user_id = message.from_user.id
     bal = get_balance(user_id)
+    user = get_user(user_id)
+    total_referrals = user[5]
 
     if bal < 500:
         return await message.answer("❌ Minimum de retrait : 500 FCFA")
+
+    if total_referrals < 3:
+        return await message.answer(
+            f"❌ Tu dois parrainer au moins 3 personnes pour effectuer un retrait.\n\n"
+            f"📊 Parrainages actuels : {total_referrals}/3"
+        )
 
     await message.answer("💳 Quel est ton mode de paiement ?")
     await WithdrawState.method.set()
@@ -275,10 +314,19 @@ async def get_name(message: types.Message, state: FSMContext):
     name = message.text
 
     bal = get_balance(user_id)
+    user = get_user(user_id)
+    total_referrals = user[5]
 
     if bal < 500:
         await state.finish()
         return await message.answer("❌ Solde insuffisant.")
+
+    if total_referrals < 3:
+        await state.finish()
+        return await message.answer(
+            f"❌ Tu dois parrainer au moins 3 personnes pour effectuer un retrait.\n\n"
+            f"📊 Parrainages actuels : {total_referrals}/3"
+        )
 
     amount = bal
 
@@ -398,6 +446,114 @@ async def stats(message: types.Message):
         f"💸 Retraits: {withdrawals}\n"
         f"💰 Balance totale: {total_balance} FCFA"
     )
+
+# ================= BROADCAST =================
+
+@dp.message_handler(lambda m: m.text == "📢 Broadcast")
+async def broadcast_start(message: types.Message):
+    if message.from_user.id != ADMIN_ID:
+        return
+
+    await message.answer(
+        "📢 BROADCAST\n\n"
+        "Envoie le message que tu veux diffuser à tous les utilisateurs.\n"
+        "Peut contenir du texte, des photos, des vidéos ou des fichiers."
+    )
+    await BroadcastState.message.set()
+
+@dp.message_handler(state=BroadcastState.message, content_types=types.ContentTypes.ANY)
+async def broadcast_send(message: types.Message, state: FSMContext):
+    await state.finish()
+
+    cursor.execute("SELECT user_id FROM users")
+    users = cursor.fetchall()
+
+    success = 0
+    failed = 0
+
+    await message.answer(f"⏳ Envoi en cours à {len(users)} utilisateurs...")
+
+    for (user_id,) in users:
+        try:
+            await message.copy_to(user_id)
+            success += 1
+        except:
+            failed += 1
+
+    await message.answer(
+        f"📢 BROADCAST TERMINÉ\n\n"
+        f"✅ Envoyé : {success}\n"
+        f"❌ Échec : {failed}"
+    )
+
+# ================= GESTION DES CANAUX =================
+
+@dp.message_handler(lambda m: m.text == "📡 Gérer Canaux")
+async def manage_channels(message: types.Message):
+    if message.from_user.id != ADMIN_ID:
+        return
+
+    channels = get_channels()
+    channels_text = "\n".join([f"• {ch}" for ch in channels])
+
+    await message.answer(
+        f"📡 GESTION DES CANAUX\n\n"
+        f"Canaux actuels :\n{channels_text}\n\n"
+        f"Choisis une action :",
+        reply_markup=manage_channels_keyboard()
+    )
+
+@dp.callback_query_handler(lambda c: c.data == "add_channel")
+async def add_channel_start(call: types.CallbackQuery):
+    if call.from_user.id != ADMIN_ID:
+        return
+
+    await call.message.answer(
+        "➕ Envoie le username du canal à ajouter.\n\n"
+        "Exemple : @moncanal"
+    )
+    await AddChannelState.username.set()
+    await call.answer()
+
+@dp.message_handler(state=AddChannelState.username)
+async def add_channel_save(message: types.Message, state: FSMContext):
+    username = message.text.strip()
+
+    if not username.startswith("@"):
+        await state.finish()
+        return await message.answer("❌ Le username doit commencer par @\nRecommence depuis 📡 Gérer Canaux.")
+
+    try:
+        cursor.execute("INSERT INTO channels (username) VALUES (?)", (username,))
+        conn.commit()
+        await message.answer(
+            f"✅ Canal {username} ajouté avec succès !\n\n"
+            f"Tous les utilisateurs devront maintenant rejoindre ce canal."
+        )
+    except sqlite3.IntegrityError:
+        await message.answer(f"⚠️ Le canal {username} existe déjà dans la liste.")
+
+    await state.finish()
+
+@dp.callback_query_handler(lambda c: c.data.startswith("del_channel:"))
+async def delete_channel(call: types.CallbackQuery):
+    if call.from_user.id != ADMIN_ID:
+        return
+
+    username = call.data.split(":", 1)[1]
+
+    cursor.execute("DELETE FROM channels WHERE username=?", (username,))
+    conn.commit()
+
+    channels = get_channels()
+    channels_text = "\n".join([f"• {ch}" for ch in channels]) if channels else "Aucun canal."
+
+    await call.message.edit_text(
+        f"🗑 Canal {username} supprimé.\n\n"
+        f"📡 Canaux restants :\n{channels_text}",
+        reply_markup=manage_channels_keyboard() if channels else None
+    )
+    await call.answer("Supprimé ✅")
 
 # ================= SUPPORT CHAT ADMIN =================
 
