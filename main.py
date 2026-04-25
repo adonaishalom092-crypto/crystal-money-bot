@@ -24,11 +24,8 @@ async def main():
     register_all_handlers(dp)
 
     logger.info("Bot prêt. En écoute…")
-    try:
-        await dp.start_polling(skip_updates=True)
-    finally:
-        await bot.session.close()
-        logger.info("Bot arrêté proprement.")
+    from aiogram import executor
+executor.start_polling(dp, skip_updates=True)
 
 if __name__ == "__main__":
     asyncio.run(main())
