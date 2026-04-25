@@ -2,7 +2,7 @@ import aiosqlite
 import logging
 
 logger = logging.getLogger(__name__)
-DB_PATH = "database.db"
+DB_PATH = "/app/data/database.db"
 
 async def init_db():
     async with aiosqlite.connect(DB_PATH) as db:
