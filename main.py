@@ -1,7 +1,6 @@
-import asyncio
 import logging
 
-from aiogram import Bot, Dispatcher
+from aiogram import Bot, Dispatcher, executor
 from aiogram.contrib.fsm_storage.memory import MemoryStorage
 
 from config import API_TOKEN
@@ -13,19 +12,15 @@ from utils.logger import setup_logger
 setup_logger()
 logger = logging.getLogger(__name__)
 
-async def main():
+async def on_startup(dp):
     logger.info("Démarrage du bot ADONAÏ MONEY…")
     await init_db()
-
-    bot = Bot(token=API_TOKEN, parse_mode="HTML")
-    dp = Dispatcher(bot, storage=MemoryStorage())
-
-    dp.middleware.setup(MainMiddleware(bot))
+    dp.middleware.setup(MainMiddleware(dp.bot))
     register_all_handlers(dp)
-
     logger.info("Bot prêt. En écoute…")
-    from aiogram import executor
-executor.start_polling(dp, skip_updates=True)
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    bot = Bot(token=API_TOKEN, parse_mode="HTML")
+    dp = Dispatcher(bot, storage=MemoryStorage())
+    
+    executor.start_polling(dp, skip_updates=True, on_startup=on_startup)
