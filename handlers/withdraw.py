@@ -11,16 +11,17 @@ from utils.states import WithdrawState
 logger = logging.getLogger(__name__)
 _processing_wids: set = set()
 
-def flouter_numero(numero: str) -> str:
-    """
-    Floute le numéro en gardant les 3 premiers 
-    et les 2 derniers caractères visibles.
-    Exemple : +225 07 12 34 56 78 → +22 ** 78
-    """
-    numero = numero.strip()
-    if len(numero) <= 5:
-        return "***"
-    return numero[:3] + " ** " + numero[-2:]
+CANAL_RETRAIT = "@adonaimoneychannel"  # ← Remplace par ton canal
+
+def flouter_numero(number: str) -> str:
+    """Floute le milieu du numéro. Ex: +225 07 12 34 56 78 → +225 07 *** ** ** 78"""
+    chiffres = re.sub(r"\D", "", number)
+    if len(chiffres) < 6:
+        return number
+    debut = chiffres[:4]
+    fin = chiffres[-2:]
+    floute = debut + " *** ** ** " + fin
+    return floute
 
 def register_withdraw(dp: Dispatcher):
 
@@ -31,13 +32,24 @@ def register_withdraw(dp: Dispatcher):
         bal = await db.get_balance(user_id)
         total_referrals = user["total_referrals"] if user else 0
         if bal < MIN_WITHDRAW:
-            return await message.answer(f"❌ Solde insuffisant.\nMinimum : <b>{MIN_WITHDRAW} FCFA</b>\nTon solde : <b>{bal} FCFA</b>")
+            return await message.answer(
+                f"❌ Solde insuffisant.\n"
+                f"Minimum : <b>{MIN_WITHDRAW} FCFA</b>\n"
+                f"Ton solde : <b>{bal} FCFA</b>"
+            )
         if total_referrals < MIN_REFERRALS:
-            return await message.answer(f"❌ Tu dois parrainer au moins <b>{MIN_REFERRALS} personnes</b>.\n📊 Actuels : <b>{total_referrals}/{MIN_REFERRALS}</b>")
+            return await message.answer(
+                f"❌ Tu dois parrainer au moins <b>{MIN_REFERRALS} personnes</b>.\n"
+                f"📊 Actuels : <b>{total_referrals}/{MIN_REFERRALS}</b>"
+            )
         pending = await db.count_pending_withdrawals(user_id)
         if pending > 0:
             return await message.answer("⏳ Tu as déjà une demande en attente.")
-        await message.answer("💳 Quel est ton mode de paiement ?\nExemple : <i>Mobile Money, Wave…</i>\n\nEnvoie /cancel pour annuler.")
+        await message.answer(
+            "💳 Quel est ton mode de paiement ?\n"
+            "Exemple : <i>Mobile Money, Wave…</i>\n\n"
+            "Envoie /cancel pour annuler."
+        )
         await WithdrawState.method.set()
 
     @dp.message_handler(state=WithdrawState.method)
@@ -46,14 +58,20 @@ def register_withdraw(dp: Dispatcher):
         if len(method) > 50:
             return await message.answer("❌ Méthode trop longue (max 50 caractères).")
         await state.update_data(method=method)
-        await message.answer("📱 Ton numéro avec indicatif.\nExemple : <code>+225 07 XX XX XX XX</code>")
+        await message.answer(
+            "📱 Ton numéro avec indicatif.\n"
+            "Exemple : <code>+225 07 XX XX XX XX</code>"
+        )
         await WithdrawState.next()
 
     @dp.message_handler(state=WithdrawState.number)
     async def get_number(message: types.Message, state: FSMContext):
         number = message.text.strip()
         if not re.match(r"^[\d\s\+\-]{6,20}$", number):
-            return await message.answer("❌ Numéro invalide.\nExemple : <code>+225 07 12 34 56 78</code>")
+            return await message.answer(
+                "❌ Numéro invalide.\n"
+                "Exemple : <code>+225 07 12 34 56 78</code>"
+            )
         await state.update_data(number=number)
         await message.answer("👤 Nom complet du bénéficiaire ?")
         await WithdrawState.next()
@@ -90,7 +108,13 @@ def register_withdraw(dp: Dispatcher):
         if bal < MIN_WITHDRAW:
             return await call.message.answer("❌ Solde insuffisant. Retrait annulé.")
         try:
-            wid = await db.create_withdrawal(user_id=user_id, amount=bal, method=data["method"], number=data["number"], name=data["name"])
+            wid = await db.create_withdrawal(
+                user_id=user_id,
+                amount=bal,
+                method=data["method"],
+                number=data["number"],
+                name=data["name"]
+            )
         except Exception as e:
             logger.error(f"Erreur create_withdrawal: {e}")
             return await call.message.answer("❌ Erreur technique. Réessaie plus tard.")
@@ -98,8 +122,11 @@ def register_withdraw(dp: Dispatcher):
             await call.bot.send_message(
                 ADMIN_ID,
                 f"📥 <b>NOUVEAU RETRAIT #{wid}</b>\n\n"
-                f"👤 ID : <code>{user_id}</code>\n💰 Montant : <b>{bal} FCFA</b>\n"
-                f"💳 Méthode : {data['method']}\n📱 Numéro : {data['number']}\n👤 Nom : {data['name']}",
+                f"👤 ID : <code>{user_id}</code>\n"
+                f"💰 Montant : <b>{bal} FCFA</b>\n"
+                f"💳 Méthode : {data['method']}\n"
+                f"📱 Numéro : {data['number']}\n"
+                f"👤 Nom : {data['name']}",
                 reply_markup=admin_withdraw_keyboard(wid),
             )
         except Exception as e:
@@ -110,7 +137,10 @@ def register_withdraw(dp: Dispatcher):
     @dp.callback_query_handler(lambda c: c.data == "cancel_wd", state=WithdrawState.confirm)
     async def cancel_withdraw(call: types.CallbackQuery, state: FSMContext):
         await state.finish()
-        await call.message.answer("❌ Retrait annulé.", reply_markup=main_keyboard(call.from_user.id))
+        await call.message.answer(
+            "❌ Retrait annulé.",
+            reply_markup=main_keyboard(call.from_user.id)
+        )
         await call.answer()
 
     @dp.callback_query_handler(lambda c: c.data.startswith("wd_paid:"))
@@ -124,52 +154,71 @@ def register_withdraw(dp: Dispatcher):
         try:
             row = await db.get_withdrawal(wid)
             if not row or row["status"] != "pending":
-                return await call.answer(f"⚠️ Statut : {row['status'] if row else 'introuvable'}", show_alert=True)
+                return await call.answer(
+                    f"⚠️ Statut : {row['status'] if row else 'introuvable'}",
+                    show_alert=True
+                )
             await db.pay_withdrawal(wid)
+
+            # ✅ Notifier l'utilisateur
             try:
-                await call.bot.send_message(row["user_id"], "✅ Ton retrait a été validé et payé 💰")
+                await call.bot.send_message(
+                    row["user_id"],
+                    "✅ Ton retrait a été validé et payé 💰\n"
+                    "Vérifie ton compte dans quelques instants !"
+                )
             except Exception:
                 pass
-            await call.bot.send_message(
-    "@adonaimoneychannel",
-    f"💸 <b>RETRAIT EFFECTUÉ ✅</b>\n\n"
-    f"🎉 Un membre vient de recevoir son paiement !\n\n"
-    f"💰 Montant : <b>{row['amount']} FCFA</b>\n"
-    f"💳 Méthode : <b>{row['method']}</b>\n"
-    f"📱 Numéro : <b>{numero_floute}</b>\n"
-    f"🕐 Statut : <b>Payé ✅</b>\n\n"
-    f"━━━━━━━━━━━━━━━\n"
-    f"👉 Toi aussi tu peux gagner !\n"
-    f"Rejoins : @adonaimoneychannel"
-)
 
-@dp.callback_query_handler(lambda c: c.data.startswith("wd_refused:"))
-async def wd_refused(call: types.CallbackQuery):
-    if call.from_user.id != ADMIN_ID:
-        return await call.answer("🚫 Réservé à l'admin.", show_alert=True)
-    wid = int(call.data.split(":")[1])
-    if wid in _processing_wids:
-        return await call.answer("⏳ Déjà en cours.", show_alert=True)
-    _processing_wids.add(wid)
-    try:
-        success = await db.refuse_withdrawal(wid)
-        if not success:
-            return await call.answer("⚠️ Déjà traité ou introuvable.", show_alert=True)
-        row = await db.get_withdrawal(wid)
-        try:
-            await call.bot.send_message(
-                row["user_id"],
-                "❌ Retrait refusé. Ton solde a été recrédité."
+            # 📢 Publier la preuve dans le canal avec numéro flouté
+            try:
+                numero_floute = flouter_numero(row["number"])
+                await call.bot.send_message(
+                    CANAL_RETRAIT,
+                    f"✅ <b>PAIEMENT EFFECTUÉ</b>\n\n"
+                    f"💰 Montant : <b>{row['amount']} FCFA</b>\n"
+                    f"💳 Méthode : <b>{row['method']}</b>\n"
+                    f"📱 Numéro : <b>{numero_floute}</b>\n"
+                    f"👤 Nom : <b>{row['name']}</b>\n\n"
+                    f"🤖 Via @Wellcashgain_bot\n"
+                    f"📲 Rejoins et gagne toi aussi !"
+                )
+            except Exception as e:
+                logger.error(f"Impossible de publier dans le canal: {e}")
+
+            await call.message.edit_text(
+                call.message.text + "\n\n✅ <b>PAYÉ</b>",
+                reply_markup=None
             )
-        except Exception:
-            pass
-        await call.message.edit_text(
-            call.message.text + "\n\n❌ <b>REFUSÉ</b>",
-            reply_markup=None
-        )
-        await call.answer("Refusé ✅")
-    except Exception as e:
-        logger.error(f"Erreur wd_refused: {e}")
-        await call.answer("❌ Erreur technique.", show_alert=True)
-    finally:
-        _processing_wids.discard(wid)
+            await call.answer("Payé ✅")
+        finally:
+            _processing_wids.discard(wid)
+
+    @dp.callback_query_handler(lambda c: c.data.startswith("wd_refused:"))
+    async def wd_refused(call: types.CallbackQuery):
+        if call.from_user.id != ADMIN_ID:
+            return await call.answer("🚫 Réservé à l'admin.", show_alert=True)
+        wid = int(call.data.split(":")[1])
+        if wid in _processing_wids:
+            return await call.answer("⏳ Déjà en cours.", show_alert=True)
+        _processing_wids.add(wid)
+        try:
+            success = await db.refuse_withdrawal(wid)
+            if not success:
+                return await call.answer("⚠️ Déjà traité ou introuvable.", show_alert=True)
+            row = await db.get_withdrawal(wid)
+            try:
+                await call.bot.send_message(
+                    row["user_id"],
+                    "❌ Retrait refusé. Ton solde a été recrédité.\n"
+                    "Contacte l'admin pour plus d'infos."
+                )
+            except Exception:
+                pass
+            await call.message.edit_text(
+                call.message.text + "\n\n❌ <b>REFUSÉ</b>",
+                reply_markup=None
+            )
+            await call.answer("Refusé ✅")
+        finally:
+            _processing_wids.discard(wid)
