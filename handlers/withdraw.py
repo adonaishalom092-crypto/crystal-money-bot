@@ -11,6 +11,17 @@ from utils.states import WithdrawState
 logger = logging.getLogger(__name__)
 _processing_wids: set = set()
 
+def flouter_numero(numero: str) -> str:
+    """
+    Floute le numéro en gardant les 3 premiers 
+    et les 2 derniers caractères visibles.
+    Exemple : +225 07 12 34 56 78 → +22 ** 78
+    """
+    numero = numero.strip()
+    if len(numero) <= 5:
+        return "***"
+    return numero[:3] + " ** " + numero[-2:]
+
 def register_withdraw(dp: Dispatcher):
 
     @dp.message_handler(lambda m: m.text == "💸 Retrait")
