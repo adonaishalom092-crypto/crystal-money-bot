@@ -143,24 +143,33 @@ def register_withdraw(dp: Dispatcher):
     f"Rejoins : @adonaimoneychannel"
 )
 
-    @dp.callback_query_handler(lambda c: c.data.startswith("wd_refused:"))
-    async def wd_refused(call: types.CallbackQuery):
-        if call.from_user.id != ADMIN_ID:
-            return await call.answer("🚫 Réservé à l'admin.", show_alert=True)
-        wid = int(call.data.split(":")[1])
-        if wid in _processing_wids:
-            return await call.answer("⏳ Déjà en cours.", show_alert=True)
-        _processing_wids.add(wid)
+@dp.callback_query_handler(lambda c: c.data.startswith("wd_refused:"))
+async def wd_refused(call: types.CallbackQuery):
+    if call.from_user.id != ADMIN_ID:
+        return await call.answer("🚫 Réservé à l'admin.", show_alert=True)
+    wid = int(call.data.split(":")[1])
+    if wid in _processing_wids:
+        return await call.answer("⏳ Déjà en cours.", show_alert=True)
+    _processing_wids.add(wid)
+    try:
+        success = await db.refuse_withdrawal(wid)
+        if not success:
+            return await call.answer("⚠️ Déjà traité ou introuvable.", show_alert=True)
+        row = await db.get_withdrawal(wid)
         try:
-            success = await db.refuse_withdrawal(wid)
-            if not success:
-                return await call.answer("⚠️ Déjà traité ou introuvable.", show_alert=True)
-            row = await db.get_withdrawal(wid)
-            try:
-                await call.bot.send_message(row["user_id"], "❌ Retrait refusé. Ton solde a été recrédité.")
-            except Exception:
-                pass
-            await call.message.edit_text(call.message.text + "\n\n❌ <b>REFUSÉ</b>", reply_markup=None)
-            await call.answer("Refusé ✅")
-        finally:
-            _processing_wids.discard(wid)
+            await call.bot.send_message(
+                row["user_id"],
+                "❌ Retrait refusé. Ton solde a été recrédité."
+            )
+        except Exception:
+            pass
+        await call.message.edit_text(
+            call.message.text + "\n\n❌ <b>REFUSÉ</b>",
+            reply_markup=None
+        )
+        await call.answer("Refusé ✅")
+    except Exception as e:
+        logger.error(f"Erreur wd_refused: {e}")
+        await call.answer("❌ Erreur technique.", show_alert=True)
+    finally:
+        _processing_wids.discard(wid)
