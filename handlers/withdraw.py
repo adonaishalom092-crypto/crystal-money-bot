@@ -130,10 +130,18 @@ def register_withdraw(dp: Dispatcher):
                 await call.bot.send_message(row["user_id"], "✅ Ton retrait a été validé et payé 💰")
             except Exception:
                 pass
-            await call.message.edit_text(call.message.text + "\n\n✅ <b>PAYÉ</b>", reply_markup=None)
-            await call.answer("Payé ✅")
-        finally:
-            _processing_wids.discard(wid)
+            await call.bot.send_message(
+    "@adonaimoneychannel",
+    f"💸 <b>RETRAIT EFFECTUÉ ✅</b>\n\n"
+    f"🎉 Un membre vient de recevoir son paiement !\n\n"
+    f"💰 Montant : <b>{row['amount']} FCFA</b>\n"
+    f"💳 Méthode : <b>{row['method']}</b>\n"
+    f"📱 Numéro : <b>{numero_floute}</b>\n"
+    f"🕐 Statut : <b>Payé ✅</b>\n\n"
+    f"━━━━━━━━━━━━━━━\n"
+    f"👉 Toi aussi tu peux gagner !\n"
+    f"Rejoins : @adonaimoneychannel"
+)
 
     @dp.callback_query_handler(lambda c: c.data.startswith("wd_refused:"))
     async def wd_refused(call: types.CallbackQuery):
