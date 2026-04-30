@@ -27,6 +27,7 @@ async def init_db():
                 total_referrals  INTEGER DEFAULT 0,
                 total_bonus      INTEGER DEFAULT 0,
                 language         TEXT,
+                country          TEXT,
                 referral_paid    INTEGER DEFAULT 0,
                 is_banned        INTEGER DEFAULT 0
             );
@@ -44,6 +45,14 @@ async def init_db():
                 username TEXT UNIQUE
             );
         """)
+
+        # Ajouter la colonne country si elle n'existe pas encore
+        # (pour les bases de données déjà existantes)
+        try:
+            await db.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS country TEXT")
+        except Exception:
+            pass
+
         await db.execute(
             "INSERT INTO channels (username) VALUES ($1) ON CONFLICT DO NOTHING",
             "@adonaimoneychannel"
@@ -88,6 +97,14 @@ async def unban_user(user_id: int):
     pool = await get_pool()
     async with pool.acquire() as db:
         await db.execute("UPDATE users SET is_banned=0 WHERE user_id=$1", user_id)
+
+async def update_country(user_id: int, country: str):
+    pool = await get_pool()
+    async with pool.acquire() as db:
+        await db.execute(
+            "UPDATE users SET country=$1 WHERE user_id=$2",
+            country, user_id
+        )
 
 async def claim_daily_bonus(user_id: int, today: str) -> bool:
     from config import DAILY_BONUS, REFERRAL_BONUS
@@ -173,6 +190,35 @@ async def get_stats() -> dict:
         total_wd = (await db.fetchrow("SELECT COUNT(*) as c FROM withdrawals"))["c"]
         total_balance = (await db.fetchrow("SELECT COALESCE(SUM(balance),0) as s FROM users"))["s"]
     return {"users": users, "pending": pending, "total_withdrawals": total_wd, "total_balance": total_balance}
+
+async def get_active_users_count(bot) -> dict:
+    """Vérifie combien d'utilisateurs sont encore dans les canaux."""
+    from middlewares.middlewares import _user_in_all_channels
+
+    user_ids = await get_all_user_ids()
+    channels = await get_channels()
+
+    active = 0
+    inactive = 0
+
+    pool = await get_pool()
+    async with pool.acquire() as db:
+        row = await db.fetchrow("SELECT COUNT(*) as c FROM users WHERE is_banned=1")
+        banned = row["c"]
+
+    for uid in user_ids:
+        ok = await _user_in_all_channels(bot, uid, channels)
+        if ok:
+            active += 1
+        else:
+            inactive += 1
+
+    return {
+        "total": len(user_ids),
+        "active": active,
+        "inactive": inactive,
+        "banned": banned
+    }
 
 async def get_channels():
     pool = await get_pool()
