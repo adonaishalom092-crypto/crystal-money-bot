@@ -4,14 +4,16 @@ from aiogram import Dispatcher, types
 from aiogram.dispatcher import FSMContext
 
 import db
-from config import ADMIN_ID, MIN_WITHDRAW, MIN_REFERRALS
+from config import ADMIN_ID, MIN_WITHDRAW, MIN_REFERRALS, GENIUSPAY_API_KEY, GENIUSPAY_WALLET_ID
 from keyboards import confirm_withdraw_keyboard, admin_withdraw_keyboard, main_keyboard
 from utils.states import WithdrawState
+from utils.geniuspay import send_payout, detect_provider
 
 logger = logging.getLogger(__name__)
 _processing_wids: set = set()
 
-CANAL_RETRAIT = "@adonaimoneychannel"  # ← Remplace par ton canal
+CANAL_RETRAIT = "@adonaimoneychannel"
+
 
 def flouter_numero(number: str) -> str:
     """Floute le milieu du numéro. Ex: +225 07 12 34 56 78 → +225 07 *** ** ** 78"""
@@ -20,8 +22,8 @@ def flouter_numero(number: str) -> str:
         return number
     debut = chiffres[:4]
     fin = chiffres[-2:]
-    floute = debut + " *** ** ** " + fin
-    return floute
+    return debut + " *** ** ** " + fin
+
 
 def register_withdraw(dp: Dispatcher):
 
@@ -31,6 +33,7 @@ def register_withdraw(dp: Dispatcher):
         user = await db.get_user(user_id)
         bal = await db.get_balance(user_id)
         total_referrals = user["total_referrals"] if user else 0
+
         if bal < MIN_WITHDRAW:
             return await message.answer(
                 f"❌ Solde insuffisant.\n"
@@ -45,9 +48,10 @@ def register_withdraw(dp: Dispatcher):
         pending = await db.count_pending_withdrawals(user_id)
         if pending > 0:
             return await message.answer("⏳ Tu as déjà une demande en attente.")
+
         await message.answer(
-            "💳 Quel est ton mode de paiement ?\n"
-            "Exemple : <i>Mobile Money, Wave…</i>\n\n"
+            "💳 Quel est ton mode de paiement ?\n\n"
+            "Exemples : <i>Wave, Orange Money, MTN MoMo, Moov</i>\n\n"
             "Envoie /cancel pour annuler."
         )
         await WithdrawState.method.set()
@@ -59,7 +63,7 @@ def register_withdraw(dp: Dispatcher):
             return await message.answer("❌ Méthode trop longue (max 50 caractères).")
         await state.update_data(method=method)
         await message.answer(
-            "📱 Ton numéro avec indicatif.\n"
+            "📱 Ton numéro avec indicatif pays.\n"
             "Exemple : <code>+225 07 XX XX XX XX</code>"
         )
         await WithdrawState.next()
@@ -99,14 +103,19 @@ def register_withdraw(dp: Dispatcher):
         )
         await WithdrawState.next()
 
-    @dp.callback_query_handler(lambda c: c.data.startswith("confirm_wd:"), state=WithdrawState.confirm)
+    @dp.callback_query_handler(
+        lambda c: c.data.startswith("confirm_wd:"),
+        state=WithdrawState.confirm
+    )
     async def confirm_withdraw(call: types.CallbackQuery, state: FSMContext):
         user_id = call.from_user.id
         data = await state.get_data()
         await state.finish()
+
         bal = await db.get_balance(user_id)
         if bal < MIN_WITHDRAW:
             return await call.message.answer("❌ Solde insuffisant. Retrait annulé.")
+
         try:
             wid = await db.create_withdrawal(
                 user_id=user_id,
@@ -118,6 +127,7 @@ def register_withdraw(dp: Dispatcher):
         except Exception as e:
             logger.error(f"Erreur create_withdrawal: {e}")
             return await call.message.answer("❌ Erreur technique. Réessaie plus tard.")
+
         try:
             await call.bot.send_message(
                 ADMIN_ID,
@@ -131,10 +141,17 @@ def register_withdraw(dp: Dispatcher):
             )
         except Exception as e:
             logger.error(f"Impossible de notifier l'admin: {e}")
-        await call.message.answer("⏳ Demande envoyée. L'admin la traitera bientôt.")
+
+        await call.message.answer(
+            "⏳ Demande envoyée.\n"
+            "L'admin la traitera bientôt via PayGenius 💳"
+        )
         await call.answer()
 
-    @dp.callback_query_handler(lambda c: c.data == "cancel_wd", state=WithdrawState.confirm)
+    @dp.callback_query_handler(
+        lambda c: c.data == "cancel_wd",
+        state=WithdrawState.confirm
+    )
     async def cancel_withdraw(call: types.CallbackQuery, state: FSMContext):
         await state.finish()
         await call.message.answer(
@@ -143,13 +160,19 @@ def register_withdraw(dp: Dispatcher):
         )
         await call.answer()
 
+    # ------------------------------------------------------------------
+    # Admin — Valider le paiement via PayGenius
+    # ------------------------------------------------------------------
+
     @dp.callback_query_handler(lambda c: c.data.startswith("wd_paid:"))
     async def wd_paid(call: types.CallbackQuery):
         if call.from_user.id != ADMIN_ID:
             return await call.answer("🚫 Réservé à l'admin.", show_alert=True)
+
         wid = int(call.data.split(":")[1])
         if wid in _processing_wids:
             return await call.answer("⏳ Déjà en cours.", show_alert=True)
+
         _processing_wids.add(wid)
         try:
             row = await db.get_withdrawal(wid)
@@ -158,67 +181,137 @@ def register_withdraw(dp: Dispatcher):
                     f"⚠️ Statut : {row['status'] if row else 'introuvable'}",
                     show_alert=True
                 )
-            await db.pay_withdrawal(wid)
 
-            # ✅ Notifier l'utilisateur
-            try:
-                await call.bot.send_message(
-                    row["user_id"],
-                    "✅ Ton retrait a été validé et payé 💰\n"
-                    "Vérifie ton compte dans quelques instants !"
-                )
-            except Exception:
-                pass
+            # Détecter le provider automatiquement
+            provider = detect_provider(row["method"])
 
-            # 📢 Publier la preuve dans le canal avec numéro flouté
-            try:
-                numero_floute = flouter_numero(row["number"])
-                await call.bot.send_message(
-                    CANAL_RETRAIT,
-                    f"✅ <b>PAIEMENT EFFECTUÉ</b>\n\n"
-                    f"💰 Montant : <b>{row['amount']} FCFA</b>\n"
-                    f"💳 Méthode : <b>{row['method']}</b>\n"
-                    f"📱 Numéro : <b>{numero_floute}</b>\n"
-                    f"👤 Nom : <b>{row['name']}</b>\n\n"
-                    f"🤖 Via @Wellcashgain_bot\n"
-                    f"📲 Rejoins et gagne toi aussi !"
-                )
-            except Exception as e:
-                logger.error(f"Impossible de publier dans le canal: {e}")
-
-            await call.message.edit_text(
-                call.message.text + "\n\n✅ <b>PAYÉ</b>",
-                reply_markup=None
+            await call.message.answer(
+                f"⏳ Envoi du paiement via PayGenius…\n\n"
+                f"💳 {row['method']} ({provider})\n"
+                f"📱 {row['number']}\n"
+                f"💰 {row['amount']} FCFA"
             )
-            await call.answer("Payé ✅")
+
+            # Appel API PayGenius
+            result = await send_payout(
+                api_key=GENIUSPAY_API_KEY,
+                wallet_id=GENIUSPAY_WALLET_ID,
+                recipient_name=row["name"],
+                recipient_phone=row["number"],
+                amount=row["amount"],
+                provider=provider,
+                description=f"Retrait ADONAI_MONEY #{wid}"
+            )
+
+            if result["status_code"] in (200, 201) and result["data"].get("success"):
+                # ✅ Succès PayGenius
+                payout_data = result["data"]["data"]["payout"]
+                payout_ref = payout_data.get("reference", "N/A")
+
+                await db.pay_withdrawal(wid)
+                await db.update_withdrawal_payout(wid, payout_ref, "processing")
+
+                # Notifier l'utilisateur
+                try:
+                    await call.bot.send_message(
+                        row["user_id"],
+                        f"✅ <b>Ton retrait a été envoyé !</b>\n\n"
+                        f"💰 Montant : <b>{row['amount']} FCFA</b>\n"
+                        f"💳 Méthode : {row['method']}\n"
+                        f"📱 Numéro : {row['number']}\n"
+                        f"🔖 Référence : <code>{payout_ref}</code>\n\n"
+                        f"⏳ L'argent arrive dans quelques minutes."
+                    )
+                except Exception:
+                    pass
+
+                # Publier la preuve dans le canal
+                try:
+                    numero_floute = flouter_numero(row["number"])
+                    await call.bot.send_message(
+                        CANAL_RETRAIT,
+                        f"💸 <b>RETRAIT EFFECTUÉ ✅</b>\n\n"
+                        f"🎉 Un membre vient de recevoir son paiement !\n\n"
+                        f"💰 Montant : <b>{row['amount']} FCFA</b>\n"
+                        f"💳 Méthode : <b>{row['method']}</b>\n"
+                        f"📱 Numéro : <b>{numero_floute}</b>\n"
+                        f"🔖 Réf : <code>{payout_ref}</code>\n\n"
+                        f"━━━━━━━━━━━━━━━\n"
+                        f"🤖 Via @Wellcashgain_bot\n"
+                        f"👉 Toi aussi tu peux gagner !\n"
+                        f"Rejoins : @adonaimoneychannel"
+                    )
+                except Exception as e:
+                    logger.error(f"Impossible de publier dans le canal: {e}")
+
+                await call.message.edit_text(
+                    call.message.text +
+                    f"\n\n✅ <b>PAYÉ via PayGenius</b>\n"
+                    f"🔖 Réf : <code>{payout_ref}</code>",
+                    reply_markup=None
+                )
+                await call.answer("Payé ✅")
+
+            else:
+                # ❌ Échec PayGenius → fallback manuel
+                error_msg = result["data"].get("message", "Erreur inconnue")
+                logger.error(f"PayGenius échec wid={wid}: {error_msg}")
+
+                await call.message.answer(
+                    f"❌ <b>Échec du paiement automatique</b>\n\n"
+                    f"Erreur PayGenius : <i>{error_msg}</i>\n\n"
+                    f"👉 Effectue le paiement manuellement\n"
+                    f"puis clique à nouveau sur ✅ Payé.",
+                    reply_markup=admin_withdraw_keyboard(wid)
+                )
+                await call.answer("❌ Échec PayGenius", show_alert=True)
+
+        except Exception as e:
+            logger.error(f"Erreur wd_paid: {e}")
+            await call.answer("❌ Erreur technique.", show_alert=True)
         finally:
             _processing_wids.discard(wid)
+
+    # ------------------------------------------------------------------
+    # Admin — Refuser le retrait
+    # ------------------------------------------------------------------
 
     @dp.callback_query_handler(lambda c: c.data.startswith("wd_refused:"))
     async def wd_refused(call: types.CallbackQuery):
         if call.from_user.id != ADMIN_ID:
             return await call.answer("🚫 Réservé à l'admin.", show_alert=True)
+
         wid = int(call.data.split(":")[1])
         if wid in _processing_wids:
             return await call.answer("⏳ Déjà en cours.", show_alert=True)
+
         _processing_wids.add(wid)
         try:
             success = await db.refuse_withdrawal(wid)
             if not success:
-                return await call.answer("⚠️ Déjà traité ou introuvable.", show_alert=True)
+                return await call.answer(
+                    "⚠️ Déjà traité ou introuvable.", show_alert=True
+                )
+
             row = await db.get_withdrawal(wid)
             try:
                 await call.bot.send_message(
                     row["user_id"],
-                    "❌ Retrait refusé. Ton solde a été recrédité.\n"
+                    "❌ Ton retrait a été refusé.\n"
+                    "Ton solde a été recrédité 💰\n\n"
                     "Contacte l'admin pour plus d'infos."
                 )
             except Exception:
                 pass
+
             await call.message.edit_text(
                 call.message.text + "\n\n❌ <b>REFUSÉ</b>",
                 reply_markup=None
             )
             await call.answer("Refusé ✅")
+
+        except Exception as e:
+            logger.error(f"Erreur wd_refused: {e}")
+            await call.answer("❌ Erreur technique.", show_alert=True)
         finally:
             _processing_wids.discard(wid)
