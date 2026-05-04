@@ -11,7 +11,7 @@ from utils.states import WithdrawState
 logger = logging.getLogger(**name**)
 _processing_wids: set = set()
 
-CANAL_RETRAIT = “@adonaimoneychannel”  # ← Remplace par ton canal
+CANAL_RETRAIT = "@adonaimoneychannel"  # ← Remplace par ton canal
 
 def flouter_numero(number: str) -> str:
 “”“Floute le milieu du numéro. Ex: +225 07 12 34 56 78 → +225 07 *** ** ** 78”””
