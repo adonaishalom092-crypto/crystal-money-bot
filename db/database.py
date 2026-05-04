@@ -4,7 +4,7 @@ import os
 
 logger = logging.getLogger(**name**)
 
-DATABASE_URL = os.getenv(“DATABASE_URL”)
+DATABASE_URL = os.getenv("DATABASE_URL")
 
 _pool = None
 
