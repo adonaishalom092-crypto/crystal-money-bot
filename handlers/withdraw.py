@@ -47,7 +47,7 @@ def register_withdraw(dp: Dispatcher):
         referrals_at_last = await db.get_referrals_at_last_withdrawal(user_id)
 
         if withdrawal_count == 0:
-            # 1er retrait — 10 parrainages au total
+            # 1er retrait — 10 parrainages au total (obligatoire pour tous, même ceux qui ont déjà retiré avant la modification)
             if total_referrals < 10:
                 return await message.answer(
                     f"❌ Tu dois parrainer <b>10 personnes</b> pour ton 1er retrait.\n\n"
@@ -56,7 +56,7 @@ def register_withdraw(dp: Dispatcher):
                 )
 
         elif withdrawal_count in (1, 2, 3):
-            # 2ème, 3ème, 4ème retrait — 5 nouveaux parrainages
+            # 2ème, 3ème, 4ème retrait — 5 nouveaux parrainages depuis le dernier retrait
             new_since_last = total_referrals - referrals_at_last
             if new_since_last < 5:
                 return await message.answer(
@@ -148,7 +148,13 @@ def register_withdraw(dp: Dispatcher):
         except Exception as e:
             logger.error(f"Erreur create_withdrawal: {e}")
             return await call.message.answer("❌ Erreur technique. Réessaie plus tard.")
+
         try:
+            # Récupérer le nombre de parrainages et le rang du retrait
+            user = await db.get_user(user_id)
+            total_referrals = user["total_referrals"] if user else 0
+            withdrawal_count = await db.get_withdrawal_count(user_id)
+
             await call.bot.send_message(
                 ADMIN_ID,
                 f"📥 <b>NOUVEAU RETRAIT #{wid}</b>\n\n"
@@ -156,11 +162,15 @@ def register_withdraw(dp: Dispatcher):
                 f"💰 Montant : <b>{bal} FCFA</b>\n"
                 f"💳 Méthode : {data['method']}\n"
                 f"📱 Numéro : {data['number']}\n"
-                f"👤 Nom : {data['name']}",
+                f"👤 Nom : {data['name']}\n\n"
+                f"━━━━━━━━━━━━━━━\n"
+                f"👥 Parrainages : <b>{total_referrals}</b>\n"
+                f"🔢 Numéro du retrait : <b>{withdrawal_count}ème</b>",
                 reply_markup=admin_withdraw_keyboard(wid),
             )
         except Exception as e:
             logger.error(f"Impossible de notifier l'admin: {e}")
+
         await call.message.answer(
             "⏳ Demande envoyée. L'admin la traitera bientôt."
         )
@@ -261,3 +271,4 @@ def register_withdraw(dp: Dispatcher):
             await call.answer("❌ Erreur technique.", show_alert=True)
         finally:
             _processing_wids.discard(wid)
+            
