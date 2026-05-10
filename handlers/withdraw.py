@@ -47,7 +47,7 @@ def register_withdraw(dp: Dispatcher):
         referrals_at_last = await db.get_referrals_at_last_withdrawal(user_id)
 
         if withdrawal_count == 0:
-            # 1er retrait — 10 parrainages au total (obligatoire pour tous, même ceux qui ont déjà retiré avant la modification)
+            # 1er retrait — 10 parrainages au total
             if total_referrals < 10:
                 return await message.answer(
                     f"❌ Tu dois parrainer <b>10 personnes</b> pour ton 1er retrait.\n\n"
@@ -137,6 +137,13 @@ def register_withdraw(dp: Dispatcher):
         bal = await db.get_balance(user_id)
         if bal < MIN_WITHDRAW:
             return await call.message.answer("❌ Solde insuffisant. Retrait annulé.")
+
+        # ✅ IMPORTANT : récupérer AVANT create_withdrawal pour avoir les vraies valeurs
+        user = await db.get_user(user_id)
+        total_referrals = user["total_referrals"] if user else 0
+        withdrawal_count = await db.get_withdrawal_count(user_id)
+        numero_retrait = withdrawal_count + 1  # 0 retraits payés → c'est le 1er
+
         try:
             wid = await db.create_withdrawal(
                 user_id=user_id,
@@ -150,11 +157,6 @@ def register_withdraw(dp: Dispatcher):
             return await call.message.answer("❌ Erreur technique. Réessaie plus tard.")
 
         try:
-            # Récupérer le nombre de parrainages et le rang du retrait
-            user = await db.get_user(user_id)
-            total_referrals = user["total_referrals"] if user else 0
-            withdrawal_count = await db.get_withdrawal_count(user_id)
-
             await call.bot.send_message(
                 ADMIN_ID,
                 f"📥 <b>NOUVEAU RETRAIT #{wid}</b>\n\n"
@@ -165,7 +167,7 @@ def register_withdraw(dp: Dispatcher):
                 f"👤 Nom : {data['name']}\n\n"
                 f"━━━━━━━━━━━━━━━\n"
                 f"👥 Parrainages : <b>{total_referrals}</b>\n"
-                f"🔢 Numéro du retrait : <b>{withdrawal_count}ème</b>",
+                f"🔢 Numéro du retrait : <b>{numero_retrait}ème</b>",
                 reply_markup=admin_withdraw_keyboard(wid),
             )
         except Exception as e:
@@ -271,4 +273,4 @@ def register_withdraw(dp: Dispatcher):
             await call.answer("❌ Erreur technique.", show_alert=True)
         finally:
             _processing_wids.discard(wid)
-            
+        
