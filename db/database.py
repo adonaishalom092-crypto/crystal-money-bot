@@ -32,13 +32,16 @@ async def init_db():
                 is_banned        INTEGER DEFAULT 0
             );
             CREATE TABLE IF NOT EXISTS withdrawals (
-                id       SERIAL PRIMARY KEY,
-                user_id  BIGINT,
-                amount   INTEGER,
-                method   TEXT,
-                number   TEXT,
-                name     TEXT,
-                status   TEXT DEFAULT 'pending'
+                id                  SERIAL PRIMARY KEY,
+                user_id             BIGINT,
+                amount              INTEGER,
+                method              TEXT,
+                number              TEXT,
+                name                TEXT,
+                status              TEXT DEFAULT 'pending',
+                payout_ref          TEXT,
+                payout_status       TEXT,
+                referrals_snapshot  INTEGER DEFAULT 0
             );
             CREATE TABLE IF NOT EXISTS channels (
                 id       SERIAL PRIMARY KEY,
@@ -46,12 +49,17 @@ async def init_db():
             );
         """)
 
-        # Ajouter la colonne country si elle n'existe pas encore
-        # (pour les bases de données déjà existantes)
-        try:
-            await db.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS country TEXT")
-        except Exception:
-            pass
+        # Colonnes optionnelles pour bases existantes
+        for col_sql in [
+            "ALTER TABLE users ADD COLUMN IF NOT EXISTS country TEXT",
+            "ALTER TABLE withdrawals ADD COLUMN IF NOT EXISTS payout_ref TEXT",
+            "ALTER TABLE withdrawals ADD COLUMN IF NOT EXISTS payout_status TEXT",
+            "ALTER TABLE withdrawals ADD COLUMN IF NOT EXISTS referrals_snapshot INTEGER DEFAULT 0",
+        ]:
+            try:
+                await db.execute(col_sql)
+            except Exception:
+                pass
 
         await db.execute(
             "INSERT INTO channels (username) VALUES ($1) ON CONFLICT DO NOTHING",
@@ -125,25 +133,58 @@ async def claim_daily_bonus(user_id: int, today: str) -> bool:
                     "UPDATE users SET balance=balance+$1, total_referrals=total_referrals+1 WHERE user_id=$2",
                     REFERRAL_BONUS, user["referrer_id"]
                 )
-                await db.execute("UPDATE users SET referral_paid=1 WHERE user_id=$1", user_id)
+                await db.execute(
+                    "UPDATE users SET referral_paid=1 WHERE user_id=$1", user_id
+                )
         return True
 
 async def count_pending_withdrawals(user_id: int) -> int:
     pool = await get_pool()
     async with pool.acquire() as db:
         row = await db.fetchrow(
-            "SELECT COUNT(*) as c FROM withdrawals WHERE user_id=$1 AND status='pending'", user_id
+            "SELECT COUNT(*) as c FROM withdrawals WHERE user_id=$1 AND status='pending'",
+            user_id
         )
         return row["c"] if row else 0
+
+async def get_withdrawal_count(user_id: int) -> int:
+    """Retourne le nombre de retraits payés de l'utilisateur."""
+    pool = await get_pool()
+    async with pool.acquire() as db:
+        row = await db.fetchrow(
+            "SELECT COUNT(*) as c FROM withdrawals WHERE user_id=$1 AND status='paid'",
+            user_id
+        )
+        return row["c"] if row else 0
+
+async def get_referrals_at_last_withdrawal(user_id: int) -> int:
+    """Retourne le snapshot de parrainages au dernier retrait payé."""
+    pool = await get_pool()
+    async with pool.acquire() as db:
+        row = await db.fetchrow(
+            "SELECT referrals_snapshot FROM withdrawals WHERE user_id=$1 AND status='paid' ORDER BY id DESC LIMIT 1",
+            user_id
+        )
+        return row["referrals_snapshot"] if row else 0
 
 async def create_withdrawal(user_id: int, amount: int, method: str, number: str, name: str) -> int:
     pool = await get_pool()
     async with pool.acquire() as db:
+        # Snapshot du nombre de parrainages au moment de la demande
+        user = await db.fetchrow(
+            "SELECT total_referrals FROM users WHERE user_id=$1", user_id
+        )
+        referrals_snapshot = user["total_referrals"] if user else 0
+
         async with db.transaction():
-            await db.execute("UPDATE users SET balance=balance-$1 WHERE user_id=$2", amount, user_id)
+            await db.execute(
+                "UPDATE users SET balance=balance-$1 WHERE user_id=$2", amount, user_id
+            )
             row = await db.fetchrow(
-                "INSERT INTO withdrawals (user_id, amount, method, number, name, status) VALUES ($1,$2,$3,$4,$5,'pending') RETURNING id",
-                user_id, amount, method, number, name
+                "INSERT INTO withdrawals "
+                "(user_id, amount, method, number, name, status, referrals_snapshot) "
+                "VALUES ($1,$2,$3,$4,$5,'pending',$6) RETURNING id",
+                user_id, amount, method, number, name, referrals_snapshot
             )
             return row["id"]
 
@@ -157,22 +198,38 @@ async def pay_withdrawal(wid: int):
     async with pool.acquire() as db:
         await db.execute("UPDATE withdrawals SET status='paid' WHERE id=$1", wid)
 
+async def update_withdrawal_payout(wid: int, payout_ref: str, payout_status: str):
+    pool = await get_pool()
+    async with pool.acquire() as db:
+        await db.execute(
+            "UPDATE withdrawals SET payout_ref=$1, payout_status=$2 WHERE id=$3",
+            payout_ref, payout_status, wid
+        )
+
 async def refuse_withdrawal(wid: int) -> bool:
     pool = await get_pool()
     async with pool.acquire() as db:
-        row = await db.fetchrow("SELECT user_id, amount, status FROM withdrawals WHERE id=$1", wid)
+        row = await db.fetchrow(
+            "SELECT user_id, amount, status FROM withdrawals WHERE id=$1", wid
+        )
         if not row or row["status"] != "pending":
             return False
         async with db.transaction():
-            await db.execute("UPDATE withdrawals SET status='refused' WHERE id=$1", wid)
-            await db.execute("UPDATE users SET balance=balance+$1 WHERE user_id=$2", row["amount"], row["user_id"])
+            await db.execute(
+                "UPDATE withdrawals SET status='refused' WHERE id=$1", wid
+            )
+            await db.execute(
+                "UPDATE users SET balance=balance+$1 WHERE user_id=$2",
+                row["amount"], row["user_id"]
+            )
         return True
 
 async def get_user_withdrawals(user_id: int, limit: int = 20):
     pool = await get_pool()
     async with pool.acquire() as db:
         return await db.fetch(
-            "SELECT amount, method, status FROM withdrawals WHERE user_id=$1 ORDER BY id DESC LIMIT $2",
+            "SELECT amount, method, status, payout_ref FROM withdrawals "
+            "WHERE user_id=$1 ORDER BY id DESC LIMIT $2",
             user_id, limit
         )
 
@@ -186,33 +243,34 @@ async def get_stats() -> dict:
     pool = await get_pool()
     async with pool.acquire() as db:
         users = (await db.fetchrow("SELECT COUNT(*) as c FROM users"))["c"]
-        pending = (await db.fetchrow("SELECT COUNT(*) as c FROM withdrawals WHERE status='pending'"))["c"]
+        pending = (await db.fetchrow(
+            "SELECT COUNT(*) as c FROM withdrawals WHERE status='pending'"))["c"]
         total_wd = (await db.fetchrow("SELECT COUNT(*) as c FROM withdrawals"))["c"]
-        total_balance = (await db.fetchrow("SELECT COALESCE(SUM(balance),0) as s FROM users"))["s"]
-    return {"users": users, "pending": pending, "total_withdrawals": total_wd, "total_balance": total_balance}
+        total_balance = (await db.fetchrow(
+            "SELECT COALESCE(SUM(balance),0) as s FROM users"))["s"]
+    return {
+        "users": users,
+        "pending": pending,
+        "total_withdrawals": total_wd,
+        "total_balance": total_balance
+    }
 
 async def get_active_users_count(bot) -> dict:
-    """Vérifie combien d'utilisateurs sont encore dans les canaux."""
     from middlewares.middlewares import _user_in_all_channels
-
     user_ids = await get_all_user_ids()
     channels = await get_channels()
-
     active = 0
     inactive = 0
-
     pool = await get_pool()
     async with pool.acquire() as db:
         row = await db.fetchrow("SELECT COUNT(*) as c FROM users WHERE is_banned=1")
         banned = row["c"]
-
     for uid in user_ids:
         ok = await _user_in_all_channels(bot, uid, channels)
         if ok:
             active += 1
         else:
             inactive += 1
-
     return {
         "total": len(user_ids),
         "active": active,
