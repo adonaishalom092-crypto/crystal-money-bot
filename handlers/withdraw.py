@@ -23,6 +23,12 @@ def flouter_numero(number: str) -> str:
     return debut + " *** ** ** " + fin
 
 
+def ordinal(n: int) -> str:
+    if n == 1:
+        return "1er"
+    return f"{n}ème"
+
+
 def register_withdraw(dp: Dispatcher):
 
     @dp.message_handler(lambda m: m.text == "💸 Retrait")
@@ -43,29 +49,46 @@ def register_withdraw(dp: Dispatcher):
         # Nombre de retraits déjà payés
         withdrawal_count = await db.get_withdrawal_count(user_id)
 
-        # Parrainages au moment du dernier retrait payé (0 si aucun)
-        referrals_at_last = await db.get_referrals_at_last_withdrawal(user_id)
-
-        # Nouveaux parrainages depuis le dernier retrait payé
-        new_since_last = total_referrals - referrals_at_last
+        # Numéro du prochain retrait
+        prochain = withdrawal_count + 1
 
         if withdrawal_count == 0:
-            # 1er retrait — 10 parrainages au total obligatoires
+            # 1er retrait — 10 parrainages au total
             if total_referrals < 10:
                 return await message.answer(
-                    f"❌ Tu dois parrainer <b>10 personnes</b> pour ton 1er retrait.\n\n"
-                    f"📊 Parrainages actuels : <b>{total_referrals}/10</b>\n"
-                    f"⏳ Il t'en manque : <b>{10 - total_referrals}</b>"
+                    f"❌ <b>Retrait refusé</b>\n\n"
+                    f"📋 <b>{ordinal(prochain)} retrait</b>\n"
+                    f"👥 Parrainages {ordinal(prochain)} retrait : <b>{total_referrals}/10</b>\n"
+                    f"⏳ Il te manque : <b>{10 - total_referrals} personne(s) à parrainer</b>\n\n"
+                    f"Tu dois obligatoirement parrainer <b>10 personnes</b> pour débloquer ton {ordinal(prochain)} retrait."
                 )
 
-        elif withdrawal_count >= 1 and withdrawal_count <= 3:
-            # 2ème, 3ème, 4ème retrait — 10 nouveaux parrainages depuis le dernier retrait
+        elif 1 <= withdrawal_count <= 3:
+            # 2ème, 3ème, 4ème retrait — 10 nouveaux parrainages depuis le dernier retrait payé
+            referrals_at_last = await db.get_referrals_at_last_withdrawal(user_id)
+            new_since_last = total_referrals - referrals_at_last
+
+            # Récupérer les snapshots de tous les retraits payés pour afficher l'historique
+            snapshots = await db.get_all_withdrawal_snapshots(user_id)
+
+            # Construire le message historique
+            historique = ""
+            for i, snap in enumerate(snapshots):
+                if i == 0:
+                    historique += f"👥 Parrainages 1er retrait : <b>{snap}</b>\n"
+                else:
+                    prev = snapshots[i - 1]
+                    diff = snap - prev
+                    historique += f"👥 Parrainages {ordinal(i + 1)}ème retrait : <b>{diff}</b>\n"
+
             if new_since_last < 10:
                 return await message.answer(
-                    f"❌ Pour ton <b>{withdrawal_count + 1}ème retrait</b>, tu dois parrainer "
-                    f"<b>10 personnes supplémentaires</b> depuis ton dernier retrait.\n\n"
-                    f"📊 Nouveaux parrainages : <b>{new_since_last}/10</b>\n"
-                    f"⏳ Il t'en manque : <b>{10 - new_since_last}</b>"
+                    f"❌ <b>Retrait refusé</b>\n\n"
+                    f"📋 Historique de tes parrainages :\n"
+                    f"{historique}"
+                    f"👥 Parrainages {ordinal(prochain)} retrait : <b>{new_since_last}/10</b>\n"
+                    f"⏳ Il te manque : <b>{10 - new_since_last} personne(s) à parrainer</b>\n\n"
+                    f"Tu dois parrainer <b>10 personnes supplémentaires</b> depuis ton dernier retrait pour débloquer ton {ordinal(prochain)} retrait."
                 )
 
         # 5ème retrait et plus → libre ✅
@@ -140,11 +163,26 @@ def register_withdraw(dp: Dispatcher):
         if bal < MIN_WITHDRAW:
             return await call.message.answer("❌ Solde insuffisant. Retrait annulé.")
 
-        # ✅ Récupérer AVANT create_withdrawal pour avoir les vraies valeurs
+        # ✅ Récupérer AVANT create_withdrawal
         user = await db.get_user(user_id)
         total_referrals = user["total_referrals"] if user else 0
         withdrawal_count = await db.get_withdrawal_count(user_id)
-        numero_retrait = withdrawal_count + 1  # 0 retraits payés → c'est le 1er
+        numero_retrait = withdrawal_count + 1
+
+        # Historique des snapshots pour affichage admin
+        snapshots = await db.get_all_withdrawal_snapshots(user_id)
+        historique_admin = ""
+        for i, snap in enumerate(snapshots):
+            if i == 0:
+                historique_admin += f"👥 Parrainages 1er retrait : <b>{snap}</b>\n"
+            else:
+                prev = snapshots[i - 1]
+                diff = snap - prev
+                historique_admin += f"👥 Parrainages {ordinal(i + 1)} retrait : <b>{diff}</b>\n"
+
+        # Parrainages pour ce nouveau retrait
+        referrals_at_last = await db.get_referrals_at_last_withdrawal(user_id)
+        new_since_last = total_referrals - referrals_at_last if withdrawal_count > 0 else total_referrals
 
         try:
             wid = await db.create_withdrawal(
@@ -168,8 +206,10 @@ def register_withdraw(dp: Dispatcher):
                 f"📱 Numéro : {data['number']}\n"
                 f"👤 Nom : {data['name']}\n\n"
                 f"━━━━━━━━━━━━━━━\n"
-                f"👥 Parrainages totaux : <b>{total_referrals}</b>\n"
-                f"🔢 Numéro du retrait : <b>{numero_retrait}ème</b>",
+                f"{historique_admin}"
+                f"👥 Parrainages {ordinal(numero_retrait)} retrait : <b>{new_since_last}</b>\n"
+                f"📊 Total parrainages : <b>{total_referrals}</b>\n"
+                f"🔢 Numéro du retrait : <b>{ordinal(numero_retrait)}</b>",
                 reply_markup=admin_withdraw_keyboard(wid),
             )
         except Exception as e:
