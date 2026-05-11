@@ -167,6 +167,67 @@ async def get_referrals_at_last_withdrawal(user_id: int) -> int:
         )
         return row["referrals_snapshot"] if row else 0
 
+async def get_all_withdrawal_snapshots(user_id: int) -> list:
+    """Retourne la liste des snapshots de tous les retraits payés, du plus ancien au plus récent."""
+    pool = await get_pool()
+    async with pool.acquire() as db:
+        rows = await db.fetch(
+            "SELECT referrals_snapshot FROM withdrawals WHERE user_id=$1 AND status='paid' ORDER BY id ASC",
+            user_id
+        )
+        return [r["referrals_snapshot"] for r in rows]
+
+async def fix_snapshots_for_old_users() -> int:
+    """
+    Corrige les anciens retraits payés dont le referrals_snapshot = 0.
+    Pour chaque utilisateur concerné, on met le snapshot du dernier retrait payé
+    à jour avec leur total_referrals actuel.
+    Ainsi leur compteur repart de maintenant et ils devront parrainer
+    10 nouvelles personnes pour le prochain retrait.
+    Retourne le nombre d'utilisateurs corrigés.
+    """
+    pool = await get_pool()
+    async with pool.acquire() as db:
+        # Trouver tous les utilisateurs qui ont au moins 1 retrait payé avec snapshot = 0
+        rows = await db.fetch("""
+            SELECT DISTINCT w.user_id
+            FROM withdrawals w
+            WHERE w.status = 'paid'
+            AND w.referrals_snapshot = 0
+        """)
+
+        count = 0
+        for row in rows:
+            uid = row["user_id"]
+
+            # Récupérer le total_referrals actuel de l'utilisateur
+            user = await db.fetchrow(
+                "SELECT total_referrals FROM users WHERE user_id=$1", uid
+            )
+            if not user:
+                continue
+
+            total_referrals = user["total_referrals"]
+
+            # Mettre à jour le snapshot du dernier retrait payé avec snapshot = 0
+            # On met le total actuel pour que le compteur repart de zéro depuis maintenant
+            await db.execute("""
+                UPDATE withdrawals
+                SET referrals_snapshot = $1
+                WHERE id = (
+                    SELECT id FROM withdrawals
+                    WHERE user_id = $2
+                    AND status = 'paid'
+                    ORDER BY id DESC
+                    LIMIT 1
+                )
+            """, total_referrals, uid)
+
+            count += 1
+            logger.info(f"Snapshot corrigé pour user {uid} → {total_referrals}")
+
+        return count
+
 async def create_withdrawal(user_id: int, amount: int, method: str, number: str, name: str) -> int:
     pool = await get_pool()
     async with pool.acquire() as db:
@@ -297,3 +358,4 @@ async def delete_channel(username: str):
     pool = await get_pool()
     async with pool.acquire() as db:
         await db.execute("DELETE FROM channels WHERE username=$1", username)
+        
