@@ -200,9 +200,27 @@ def register_admin(dp: Dispatcher):
             f"🚫 Banni : {'Oui' if user['is_banned'] else 'Non'}"
         )
 
+    # ✅ Commande pour corriger les snapshots des anciens utilisateurs
+    @dp.message_handler(commands=["fix_snapshots"])
+    async def fix_snapshots(message: types.Message):
+        if message.from_user.id != ADMIN_ID:
+            return
+        await message.answer("⏳ Correction des snapshots en cours...")
+        try:
+            count = await db.fix_snapshots_for_old_users()
+            await message.answer(
+                f"✅ <b>Correction terminée !</b>\n\n"
+                f"👥 <b>{count} utilisateur(s)</b> corrigé(s).\n\n"
+                f"Désormais leur compteur repart de zéro.\n"
+                f"Ils devront parrainer <b>10 nouvelles personnes</b> "
+                f"pour leur prochain retrait."
+            )
+        except Exception as e:
+            logger.error(f"Erreur fix_snapshots: {e}")
+            await message.answer("❌ Erreur technique lors de la correction.")
+
     # ------------------------------------------------------------------
     # Réception messages utilisateurs → admin
-    # Supporte : texte, vocal, audio, photo, vidéo, document, sticker
     # ------------------------------------------------------------------
 
     @dp.message_handler(
@@ -220,14 +238,12 @@ def register_admin(dp: Dispatcher):
     )
     async def forward_to_admin(message: types.Message):
         try:
-            # En-tête avec bouton répondre
             from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
             kb = InlineKeyboardMarkup()
             kb.add(InlineKeyboardButton(
                 f"↩️ Répondre à {message.from_user.first_name}",
                 callback_data=f"reply_to:{message.from_user.id}"
             ))
-
             await message.bot.send_message(
                 ADMIN_ID,
                 f"📩 <b>Message de {message.from_user.first_name}</b>\n"
@@ -235,9 +251,7 @@ def register_admin(dp: Dispatcher):
                 f"📎 Type : {message.content_type}",
                 reply_markup=kb
             )
-            # Transférer le message original
             await message.forward(ADMIN_ID)
-
         except Exception as e:
             logger.error(f"Impossible de transmettre: {e}")
 
@@ -260,7 +274,7 @@ def register_admin(dp: Dispatcher):
         await call.answer()
 
     # ------------------------------------------------------------------
-    # Admin envoie sa réponse (n'importe quel type)
+    # Admin envoie sa réponse
     # ------------------------------------------------------------------
 
     @dp.message_handler(
@@ -279,18 +293,14 @@ def register_admin(dp: Dispatcher):
         if message.from_user.id != ADMIN_ID:
             return
         await state.finish()
-
         target_id = _admin_reply_target.get(ADMIN_ID)
         if not target_id:
             return await message.answer("❌ Cible introuvable. Réessaie.")
-
         try:
-            # Envoyer en-tête à l'utilisateur
             await message.bot.send_message(
                 target_id,
                 "📨 <b>Message de l'administrateur :</b>"
             )
-            # Copier le message (vocal, photo, texte, etc.)
             await message.copy_to(target_id)
             await message.answer("✅ Réponse envoyée.")
         except Exception as e:
@@ -298,3 +308,4 @@ def register_admin(dp: Dispatcher):
             await message.answer("❌ Impossible d'envoyer. L'utilisateur a peut-être bloqué le bot.")
         finally:
             _admin_reply_target.pop(ADMIN_ID, None)
+            
