@@ -43,27 +43,29 @@ def register_withdraw(dp: Dispatcher):
         # Nombre de retraits déjà payés
         withdrawal_count = await db.get_withdrawal_count(user_id)
 
-        # Parrainages au moment du dernier retrait payé
+        # Parrainages au moment du dernier retrait payé (0 si aucun)
         referrals_at_last = await db.get_referrals_at_last_withdrawal(user_id)
 
+        # Nouveaux parrainages depuis le dernier retrait payé
+        new_since_last = total_referrals - referrals_at_last
+
         if withdrawal_count == 0:
-            # 1er retrait — 10 parrainages au total
+            # 1er retrait — 10 parrainages au total obligatoires
             if total_referrals < 10:
                 return await message.answer(
                     f"❌ Tu dois parrainer <b>10 personnes</b> pour ton 1er retrait.\n\n"
-                    f"📊 Actuels : <b>{total_referrals}/10</b>\n"
+                    f"📊 Parrainages actuels : <b>{total_referrals}/10</b>\n"
                     f"⏳ Il t'en manque : <b>{10 - total_referrals}</b>"
                 )
 
-        elif withdrawal_count in (1, 2, 3):
-            # 2ème, 3ème, 4ème retrait — 5 nouveaux parrainages depuis le dernier retrait
-            new_since_last = total_referrals - referrals_at_last
-            if new_since_last < 5:
+        elif withdrawal_count >= 1 and withdrawal_count <= 3:
+            # 2ème, 3ème, 4ème retrait — 10 nouveaux parrainages depuis le dernier retrait
+            if new_since_last < 10:
                 return await message.answer(
                     f"❌ Pour ton <b>{withdrawal_count + 1}ème retrait</b>, tu dois parrainer "
-                    f"<b>5 personnes supplémentaires</b> depuis ton dernier retrait.\n\n"
-                    f"📊 Nouveaux parrainages : <b>{new_since_last}/5</b>\n"
-                    f"⏳ Il t'en manque : <b>{5 - new_since_last}</b>"
+                    f"<b>10 personnes supplémentaires</b> depuis ton dernier retrait.\n\n"
+                    f"📊 Nouveaux parrainages : <b>{new_since_last}/10</b>\n"
+                    f"⏳ Il t'en manque : <b>{10 - new_since_last}</b>"
                 )
 
         # 5ème retrait et plus → libre ✅
@@ -138,7 +140,7 @@ def register_withdraw(dp: Dispatcher):
         if bal < MIN_WITHDRAW:
             return await call.message.answer("❌ Solde insuffisant. Retrait annulé.")
 
-        # ✅ IMPORTANT : récupérer AVANT create_withdrawal pour avoir les vraies valeurs
+        # ✅ Récupérer AVANT create_withdrawal pour avoir les vraies valeurs
         user = await db.get_user(user_id)
         total_referrals = user["total_referrals"] if user else 0
         withdrawal_count = await db.get_withdrawal_count(user_id)
@@ -166,7 +168,7 @@ def register_withdraw(dp: Dispatcher):
                 f"📱 Numéro : {data['number']}\n"
                 f"👤 Nom : {data['name']}\n\n"
                 f"━━━━━━━━━━━━━━━\n"
-                f"👥 Parrainages : <b>{total_referrals}</b>\n"
+                f"👥 Parrainages totaux : <b>{total_referrals}</b>\n"
                 f"🔢 Numéro du retrait : <b>{numero_retrait}ème</b>",
                 reply_markup=admin_withdraw_keyboard(wid),
             )
