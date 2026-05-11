@@ -273,4 +273,4 @@ def register_withdraw(dp: Dispatcher):
             await call.answer("❌ Erreur technique.", show_alert=True)
         finally:
             _processing_wids.discard(wid)
-        
+            
