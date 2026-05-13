@@ -21,8 +21,8 @@ GENIUSPAY_API_KEY: str = _optional("GENIUSPAY_API_KEY")
 GENIUSPAY_WALLET_ID: str = _optional("GENIUSPAY_WALLET_ID")
 
 # ── Constantes du bot ───────────────────────────────────────────────
-DAILY_BONUS: int = 50           # FCFA par bonus quotidien
-REFERRAL_BONUS: int = 75        # FCFA par parrainage validé
-MIN_WITHDRAW: int = 1000        # Montant minimum de retrait
-MIN_REFERRALS: int = 10         # Parrainages requis pour 1er retrait
-RATE_LIMIT_SECONDS: int = 2     # Délai minimum entre deux actions
+DAILY_BONUS: int = 50            # FCFA par bonus quotidien
+REFERRAL_BONUS: int = 1500       # FCFA par parrainage validé
+MIN_WITHDRAW: int = 30000        # Montant minimum de retrait
+MIN_REFERRALS: int = 20          # Parrainages requis par retrait
+RATE_LIMIT_SECONDS: int = 2      # Délai minimum entre deux actions
